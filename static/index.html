@@ -108,6 +108,7 @@
 <header>
   <h1>⛽ Petrol</h1>
   <span class="sub">цены на топливо · Иваново</span>
+  <span class="sub" id="dataSource" style="font-size: 11px; opacity: 0.6;" title="Источник данных"></span>
   <span class="upd" id="upd"></span>
   <span class="sub" id="appVersion" style="margin-left: auto; font-size: 11px; opacity: 0.6;"></span>
 </header>
@@ -399,6 +400,18 @@ document.getElementById('refreshBtn').onclick = async function() {
   }
 };
 
+async function loadDataSource() {
+  try {
+    const d = await (await fetch(API + '/prices/source')).json();
+    const sourceEl = document.getElementById('dataSource');
+    if (sourceEl) {
+      const icons = { russiabase: '📊', cardoil: '🔄' };
+      sourceEl.textContent = `${icons[d.source] || '📍'} ${d.source}`;
+      sourceEl.title = `Источник: ${d.source}`;
+    }
+  } catch (_) { }
+}
+
 async function loadVersion() {
   try {
     const d = await (await fetch(API + '/version')).json();
@@ -424,6 +437,7 @@ async function loadVersion() {
 (async function() {
   initMap();
   try {
+    await loadDataSource();
     await loadVersion();
     await loadSummary();
     await loadStations();
@@ -513,7 +527,7 @@ if ('serviceWorker' in navigator) {
 
       // Проверяем обновления: сразу, потом раз в час, и при возврате на вкладку
       reg.update().catch(() => {});
-      setInterval(() => reg.update().catch(() => {}), 3600000);
+      setInterval(() => { reg.update().catch(() => {}); loadDataSource().catch(() => {}); }, 3600000);
 
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
