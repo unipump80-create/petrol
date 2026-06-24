@@ -29,17 +29,32 @@ HEADERS = {
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
 }
 
-# Имя колонки в FilterAZS.json -> наш код топлива.
+import math
+
+# Имя колонки в FilterAZS.json -> наш код топлива (см. app/services/fuel_codes).
 # Несколько колонок могут мапиться в один код (Gaz/Metan -> gas).
 FUEL_COLUMNS = {
     "DT": "diesel",
+    "DTP": "dieselplus",
     "Ai92": "ai92",
+    "Ai92P": "ai92plus",
     "Ai95": "ai95",
+    "Ai95P": "ai95plus",
     "Ai98": "ai98",
     "Ai100": "ai100",
     "Gaz": "gas",
     "Metan": "gas",
 }
+
+# Радиус уверенного сопоставления russiabase<->card-oil (метры)
+MATCH_RADIUS_M = 150
+
+
+def _dist_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Грубое расстояние в метрах (плоская аппроксимация, хватает для <1 км)."""
+    dlat = (lat1 - lat2) * 111_000
+    dlon = (lon1 - lon2) * 111_000 * math.cos(math.radians(lat1))
+    return math.hypot(dlat, dlon)
 
 
 def fetch_cardoil_points(bbox: tuple[float, float, float, float] = IVANOVO_BBOX) -> list[dict]:
@@ -127,3 +142,54 @@ def load_cardoil_ivanovo(db: Session) -> tuple[int, int]:
     db.commit()
     logger.info("cardoil: загружено/обновлено %d станций (без цен)", n)
     return n, 0
+
+
+def enrich_availability(db: Session, bbox: tuple = IVANOVO_BBOX,
+                        max_dist_m: float = MATCH_RADIUS_M) -> dict:
+    """Обновляет наличие топлива (fuel_types) станций russiabase по card-oil.
+
+    Card-oil — источник истины наличия: для каждой станции russiabase ищем
+    ближайшую точку card-oil ТОГО ЖЕ бренда в радиусе max_dist_m и берём её
+    набор видов топлива как авторитетный (перезаписываем fuel_types).
+
+    Цены не трогаем — они остаются из russiabase. Станции без совпадения
+    остаются как есть (наличие из russiabase).
+
+    Returns:
+        Статистика обогащения.
+    """
+    points = fetch_cardoil_points(bbox)
+    by_brand: dict[str, list[dict]] = {}
+    for p in points:
+        by_brand.setdefault(p["brand"], []).append(p)
+
+    # только станции russiabase (не сами cardoil_*)
+    rb_stations = [
+        s for s in db.query(Station).all()
+        if s.lat and s.lon and not (s.poiid or "").startswith("cardoil_")
+    ]
+
+    matched = changed = 0
+    for st in rb_stations:
+        candidates = by_brand.get(st.brand)
+        if not candidates:
+            continue
+        near = min(candidates, key=lambda c: _dist_m(st.lat, st.lon, c["lat"], c["lon"]))
+        if _dist_m(st.lat, st.lon, near["lat"], near["lon"]) > max_dist_m:
+            continue
+        matched += 1
+        new_fuels = near["fuel_types"]
+        if new_fuels and new_fuels != (st.fuel_types or []):
+            st.fuel_types = new_fuels
+            changed += 1
+
+    db.commit()
+    stats = {
+        "cardoil_points": len(points),
+        "russiabase_stations": len(rb_stations),
+        "matched": matched,
+        "availability_updated": changed,
+    }
+    logger.info("cardoil enrich: матч %d/%d, обновлено наличие у %d",
+                matched, len(rb_stations), changed)
+    return stats

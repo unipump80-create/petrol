@@ -1,5 +1,5 @@
-from fastapi import APIRouter
-from app.services.cache import cache_get, cache_set, cache_stats, Depends
+from fastapi import APIRouter, Depends
+from app.services.cache import cache_get, cache_set, cache_stats
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.database import get_db

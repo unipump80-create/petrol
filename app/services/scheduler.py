@@ -3,8 +3,7 @@ import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from app.database import SessionLocal
 from app.services.russiabase_loader import load_ivanovo
-from app.services.cardoil_loader import load_cardoil_ivanovo
-from app.config import settings
+from app.services.cardoil_loader import enrich_availability
 
 logger = logging.getLogger(__name__)
 
@@ -15,14 +14,17 @@ scheduler = BackgroundScheduler(timezone="Europe/Moscow")
 
 
 def refresh_job():
-    """Обновление данных из выбранного источника."""
+    """Обновление данных: цены из russiabase + наличие из card-oil."""
     db = SessionLocal()
     try:
-        if settings.data_source == "cardoil":
-            ns, np = load_cardoil_ivanovo(db)
-        else:
-            ns, np = load_ivanovo(db)
-        logger.info("refresh: %d станций, %d цен (включая Газпромнефть)", ns, np)
+        ns, npr = load_ivanovo(db)
+        logger.info("refresh: %d станций, %d цен (russiabase)", ns, npr)
+        # card-oil — источник истины наличия; обогащаем после загрузки цен.
+        # Не валим refresh, если card-oil недоступен.
+        try:
+            enrich_availability(db)
+        except Exception:
+            logger.exception("refresh: card-oil обогащение не удалось (наличие из russiabase)")
     except Exception:
         logger.exception("refresh: ошибка обновления данных")
     finally:

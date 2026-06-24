@@ -6,6 +6,7 @@ from app.models import Station, Price
 from app.schemas import StationOut, StationListItem, PriceOut
 from app.services.fuel_codes import FUEL_TYPES
 from app.services.russiabase_loader import load_ivanovo
+from app.services.cardoil_loader import enrich_availability
 from app.config import settings
 from app.utils import utcnow
 
@@ -32,7 +33,12 @@ def refresh(db: Session = Depends(get_db)):
             )
     _last_refresh = now
     ns, npr = load_ivanovo(db)
-    return {"stations": ns, "prices": npr}
+    enrich = {}
+    try:
+        enrich = enrich_availability(db)
+    except Exception:
+        pass  # наличие останется из russiabase
+    return {"stations": ns, "prices": npr, "cardoil": enrich}
 
 # Пороги свежести данных (дни)
 FRESH_DAYS = 1
@@ -72,10 +78,11 @@ def list_stations(
         observed = None
         available = True
         if fuel:
+            # наличие = членство в fuel_types (истина card-oil там, где есть матч;
+            # иначе из russiabase). Цена — из russiabase, если она есть.
+            available = fuel in (st.fuel_types or [])
             match = next((p for p in st.prices if p.fuel_type == fuel), None)
-            if match is None:
-                available = False  # не продаёт это топливо — покажем серым
-            else:
+            if match is not None:
                 price = match.price
                 observed = match.observed_at
         elif st.prices:

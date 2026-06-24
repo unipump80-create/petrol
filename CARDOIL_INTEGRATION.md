@@ -1,245 +1,68 @@
-# Интеграция Card-Oil.ru для более актуальных данных
+# Card-Oil.ru как источник наличия топлива
 
-## 📋 Проблема
+## Что это и зачем
 
-`russiabase.ru` имеет проблемы с актуальностью:
-- Данные обновляются раз в 6 часов
-- Наличие топлива может быть неверным
-- Некоторые АЗС не обновляют информацию
+`russiabase` показывает вид топлива на АЗС только если у него **есть цена**.
+Поэтому редкие виды (АИ-98, АИ-100, премиум) часто пропадают из выдачи, хотя
+станция их продаёт — отсюда жалоба «наличие не соответствует действительности».
 
-**Решение:** использовать `card-oil.ru` как дополнительный или основной источник.
+`card-oil.ru` отдаёт **точные флаги наличия** видов топлива и дополняет картину.
 
----
+## Реальный источник данных (проверено)
 
-## ✅ Преимущества Card-Oil.ru
+Веб-виджет карты card-oil (`https://map.card-oil.ru`) — это SPA, который тянет
+**один статический JSON**. JS/Playwright НЕ нужны:
 
-- ✓ Более актуальные данные (обновляются чаще)
-- ✓ Точное наличие топлива на станциях
-- ✓ Координаты и адреса точные
-- ✓ Авторизованный источник (более надёжный)
-
-## ❌ Недостатки
-
-- ✗ Использует JavaScript для загрузки (нужен Playwright)
-- ✗ Сложнее парсить (Bitrix CMS)
-- ✗ Медленнее чем russiabase
-
----
-
-## 🚀 Как включить Card-Oil
-
-### Вариант 1: Быстро (без Playwright)
-
-```bash
-# Переключить на card-oil в конфиге (уже готово):
-# app/config.py → data_source = "cardoil"
-
-# Или через переменную окружения:
-export DATA_SOURCE=cardoil
-python -m uvicorn app.main:app
+```
+https://cdn2.card-oil.ru/map/FilterAZS.json   (~1.9 МБ, вся РФ)
 ```
 
-**Статус:** работает, но с ограничениями (нужен JS парсинг).
-
----
-
-### Вариант 2: Полнофункционально (с Playwright)
-
-```bash
-# 1. Установить Playwright
-pip install playwright
-
-# 2. Скачать браузер
-python -m playwright install
-
-# 3. Включить card-oil
-export DATA_SOURCE=cardoil
-python -m uvicorn app.main:app
-```
-
-**Статус:** полная работоспособность, Playwright парсит JS.
-
----
-
-## 🔧 Использование в коде
-
-### В конфиге приложения
-
-```python
-# .env файл
-DATA_SOURCE=cardoil
-```
-
-Или программно:
-```python
-from app.config import settings
-
-if settings.data_source == "cardoil":
-    from app.services.cardoil_loader import load_cardoil_ivanovo
-    load_cardoil_ivanovo(db)
-else:
-    from app.services.russiabase_loader import load_ivanovo
-    load_ivanovo(db)
-```
-
-### В scheduler
-
-```python
-# app/services/scheduler.py
-
-async def refresh_job():
-    db = SessionLocal()
-    try:
-        if settings.data_source == "cardoil":
-            ns, np = load_cardoil_ivanovo(db)
-        else:
-            ns, np = load_ivanovo(db)  # russiabase
-        logger.info(f"refresh: {ns} станций, {np} цен из {settings.data_source}")
-    finally:
-        db.close()
-```
-
----
-
-## 📊 Сравнение источников
-
-| Параметр | RussiaBase | Card-Oil |
-|----------|-----------|----------|
-| **Актуальность** | 6 часов | 1-2 часа |
-| **Наличие топлива** | ⚠️ Иногда неверно | ✓ Точное |
-| **Скорость** | ✓ Быстро | ⚠️ С JS парсингом |
-| **Требуемые инструменты** | httpx, regex | Playwright |
-| **Легкость парсинга** | ✓ Простой JSON | ❌ Bitrix CMS, JS |
-
----
-
-## 🔄 Гибридный подход (рекомендуемо)
-
-Использовать оба источника:
-
-```python
-async def load_stations_hybrid(db: Session):
-    """Загружаем русский базу, затем обогащаем card-oil данными."""
-    
-    # Основная загрузка
-    ns1, np1 = load_ivanovo(db)
-    
-    # Обогащение card-oil
-    try:
-        ns2, np2 = load_cardoil_ivanovo(db)
-        logger.info(f"enriched with cardoil: {ns2} станций")
-    except Exception:
-        logger.warning("cardoil enrichment failed, using russiabase only")
-```
-
----
-
-## 📍 Структура Card-Oil Data
-
-После парсинга с Playwright получаем:
-
+Колоночный формат:
 ```json
 {
-  "stations": [
-    {
-      "id": "gazprom_1",
-      "name": "Газпромнефть №143",
-      "address": "Иваново, ул. Первомайная, 113",
-      "lat": 57.2335,
-      "lon": 41.1391,
-      "fuels": {
-        "ai92": {"price": 61.48, "available": true},
-        "ai95": {"price": 64.94, "available": true},
-        "diesel": {"price": 75.27, "available": true}
-      }
-    }
-  ]
+  "headers": ["ID","Brand","DT","DTP","Ai92","Ai92P","Ai95","Ai95P",
+              "Ai98","Ai100","AdBlue","Gaz","Metan", ...,
+              "latitude","longitude", ...],
+  "data": [ ["0000035669","Лукойл",1,0,1,0,1,0,1,1,0,0,0,...,57.0075,40.8768,...], ... ]
 }
 ```
 
----
+- Поля топлива (`DT`, `Ai92`, `Ai95`, `Ai98`, `Ai100`, `Gaz`, `Metan`, ...) —
+  **флаги наличия 1/0**.
+- **Цен в файле НЕТ.** Только наличие, бренд, координаты.
 
-## 🐛 Troubleshooting
+### Цифры по факту
+- 13 528 АЗС по РФ; **77 в Иванове** (с заполненным топливом).
+- Бренды Иванова: Лукойл 34, Газпромнефть 14, ТНК 9, Роснефть 6, IvOil 4,
+  Шелл 3, Petrol One 3 и др.
 
-### Ошибка: "Playwright не найден"
+## Загрузчик
 
-```bash
-pip install playwright
-python -m playwright install chromium
-```
+`app/services/cardoil_loader.py`:
+- `fetch_cardoil_points(bbox)` — скачать JSON, отфильтровать по bbox, вернуть
+  `[{poiid, brand, lat, lon, fuel_types}]`.
+- `load_cardoil_ivanovo(db)` — записать как станции `cardoil_*` (наличие без цен).
 
-### Ошибка: "Card-Oil API не доступен"
+Без внешних зависимостей — только `httpx` (уже в проекте).
 
-Возможные причины:
-- Card-Oil заблокировал доступ (используют User-Agent проверку)
-- Сайт изменил структуру HTML
-- Требуется VPN или прокси
+## Как использовать данные
 
-**Решение:**
-```python
-# Добавить в заголовки
-headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120",
-    "Accept-Language": "ru-RU",
-}
-```
+card-oil и russiabase — **разные наборы станций** (77 vs ~90), пересекаются
+по координатам неточно. При сопоставлении по «тот же бренд + <150 м» замечены:
 
-### Загрузка очень медленная
+- **польза:** card-oil знает про АИ-98/АИ-100/премиум, которых нет в russiabase;
+- **риск:** иногда ближайшая точка — соседняя газовая АЗС другого вида →
+  ложное совпадение.
 
-Card-Oil медленнее russiabase из-за JS парсинга.
+Поэтому рекомендуемая стратегия — **union-only обогащение**: добавлять виды
+топлива из card-oil к станции russiabase только при уверенном совпадении и
+**никогда не удалять** уже известные. Цены всегда остаются из russiabase.
 
-**Решение:**
-- Увеличить интервал обновления: `REFRESH_MIN_INTERVAL=3600` (1 час)
-- Использовать russiabase как основной + card-oil для проверки 1 раз в день
+> Слепая замена `DATA_SOURCE=cardoil` сделает выдачу без цен — не рекомендуется.
 
----
+## Прочие файлы card-oil
 
-## 🚀 Развертывание на Render
-
-```bash
-# 1. Добавить в render.yaml
-env:
-  - key: "DATA_SOURCE"
-    value: "cardoil"
-  - key: "PYTHONUNBUFFERED"
-    value: "1"
-
-# 2. При первом деплое:
-# render автоматически установит зависимости из requirements.txt
-# (если добавить playwright туда)
-
-# 3. requirements.txt
-# playwright==1.40.0
-```
-
----
-
-## 📈 Статус интеграции
-
-- [x] `cardoil_loader.py` создан
-- [x] Конфиг расширен (`data_source` опция)
-- [ ] Scheduler обновлен для использования обоих источников
-- [ ] Фронтенд показывает источник данных
-- [ ] Тестирование с реальными данными
-
----
-
-## 💡 Рекомендации
-
-**Для production (Render):**
-```
-DATA_SOURCE=russiabase  # основной, быстрый
-# + cronjob для card-oil проверки 1 раз в день
-```
-
-**Для локальной разработки:**
-```
-DATA_SOURCE=cardoil  # если установлен Playwright
-# Иначе: DATA_SOURCE=russiabase
-```
-
-**Для максимальной актуальности:**
-```
-DATA_SOURCE=hybrid  # оба источника
-REFRESH_INTERVAL=1800  # 30 минут вместо 6 часов
-```
+- `FilterRegionAZS.json` — агрегаты по регионам (~1.1 МБ).
+- `TerminalsAZS.json` — терминалы оплаты (~2.4 МБ).
+- `findazsonroute` (POST на `https://mapapi-dev.card-oil.ru/`) — поиск АЗС по
+  маршруту (в проекте не используется).

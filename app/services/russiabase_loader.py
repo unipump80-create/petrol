@@ -15,7 +15,6 @@ from datetime import datetime
 import httpx
 from sqlalchemy.orm import Session
 from app.models import Station, Price
-from app.models_history import PriceHistory
 from app.services.fuel_codes import RUSSIABASE_MAP
 from app.services.brands import normalize_brand
 
@@ -150,12 +149,6 @@ def load_ivanovo(db: Session) -> tuple[int, int]:
         # добавить собранные цены
         for p in prices_to_add:
             db.add(Price(station=station, **p, source="russiabase"))
-                            db.add(PriceHistory(
-                                station_id=station.id,
-                                fuel_type=p['fuel_type'],
-                                price=p['price'],
-                                source="russiabase"
-                            ))
 
         n_stations += 1
 
