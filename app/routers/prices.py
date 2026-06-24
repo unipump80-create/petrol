@@ -5,6 +5,10 @@ from app.database import get_db
 from app.models import Station, Price
 from app.schemas import PricesSummary, FuelSummary
 from app.services.fuel_codes import FUEL_TYPES
+from app.services.gazprom_loader import (
+    get_gazprom_availability_summary,
+    get_gazprom_locations,
+)
 
 router = APIRouter(prefix="/prices", tags=["prices"])
 
@@ -42,3 +46,19 @@ def prices_summary(db: Session = Depends(get_db)):
         fuels=fuels,
         updated_at=db.query(func.max(Price.observed_at)).scalar(),
     )
+
+
+@router.get("/gazprom/availability")
+def gazprom_availability(db: Session = Depends(get_db)):
+    """Статистика доступности топлива на АЗС Газпромнефти."""
+    return get_gazprom_availability_summary(db)
+
+
+@router.get("/gazprom/locations")
+def gazprom_locations(db: Session = Depends(get_db)):
+    """Все локации АЗС Газпромнефти с ценами и топливом."""
+    locations = get_gazprom_locations(db)
+    return {
+        "count": len(locations),
+        "stations": locations
+    }

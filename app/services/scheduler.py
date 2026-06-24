@@ -16,7 +16,7 @@ def refresh_job():
     db = SessionLocal()
     try:
         ns, np = load_ivanovo(db)
-        logger.info("refresh: %d станций, %d цен", ns, np)
+        logger.info("refresh: %d станций, %d цен (включая Газпромнефть)", ns, np)
     except Exception:
         logger.exception("refresh: ошибка обновления данных")
     finally:

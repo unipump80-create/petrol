@@ -39,6 +39,9 @@ python -m uvicorn app.main:app --reload
 Сервер: `http://localhost:8000`
 - GET `/` — приветствие
 - GET `/health` — статус
+- GET `/prices/summary` — сводка по городу (мин/средн/макс)
+- GET `/prices/gazprom/availability` — доступность топлива на Газпромнефти
+- GET `/prices/gazprom/locations` — все локации Газпромнефти с ценами
 
 ## Структура
 
