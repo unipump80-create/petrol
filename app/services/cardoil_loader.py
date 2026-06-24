@@ -225,3 +225,36 @@ class CardOilLoader:
         except Exception as e:
             logger.error(f"cardoil playwright: {e}")
             return None
+
+
+async def fetch_all_brands_ivanovo() -> list[str]:
+    """Получить список всех доступных брендов на card-oil.ru для Иванова."""
+    brands = [
+        'gazpromneft',
+        'lukoil', 
+        'tatnefit',
+        'surgutneftegaz',
+        'rosneft',
+        'itera',
+        'esso',
+        'shell',
+        'azneft',
+    ]
+    return brands
+
+
+async def fetch_cardoil_all_brands(city: str = 'ivanovo') -> dict:
+    """Загрузить АЗС всех брендов с card-oil.ru."""
+    all_stations = {}
+    brands = await fetch_all_brands_ivanovo()
+
+    for brand in brands:
+        try:
+            stations = await fetch_cardoil_stations(city, brand)
+            if stations:
+                all_stations[brand] = stations
+                logger.info(f"cardoil: {brand} — {len(stations)} станций")
+        except Exception as e:
+            logger.warning(f"cardoil: {brand} — ошибка: {e}")
+
+    return all_stations
