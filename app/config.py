@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     # минимальный интервал между обновлениями из источника (сек)
     refresh_min_interval: int = 300
 
+    # Выбор источника данных: "russiabase" или "cardoil"
+    # russiabase - более полный, cardoil - более свежие данные о наличии
+    data_source: str = "russiabase"
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
