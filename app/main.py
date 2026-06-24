@@ -9,6 +9,8 @@ from app.config import settings
 from app.services.scheduler import start_scheduler, stop_scheduler
 from app.routers import stations, prices
 
+APP_VERSION = "0.2.0"
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -18,7 +20,7 @@ async def lifespan(app: FastAPI):
     stop_scheduler()
 
 
-app = FastAPI(title="Petrol", version="0.1.0", debug=settings.debug, lifespan=lifespan)
+app = FastAPI(title="Petrol", version=APP_VERSION, debug=settings.debug, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -40,6 +42,11 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/version")
+def version():
+    return {"version": APP_VERSION}
+
+
 @app.get("/")
 def root():
     return FileResponse(STATIC_DIR / "index.html")
@@ -53,8 +60,13 @@ def manifest():
 
 @app.get("/sw.js")
 def service_worker():
-    # отдаём из корня — иначе scope не покроет всё приложение
-    return FileResponse(STATIC_DIR / "sw.js", media_type="application/javascript")
+    # отдаём из корня — иначе scope не покроет всё приложение.
+    # no-cache обязателен: иначе браузер не заметит новую версию SW
+    return FileResponse(
+        STATIC_DIR / "sw.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
 
 
 if __name__ == "__main__":

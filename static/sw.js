@@ -1,5 +1,7 @@
 // Service worker: офлайн-оболочка + кэш данных
-const CACHE = 'petrol-v1';
+// Версию бампать при каждом релизе — иначе старый кэш не сбросится.
+const VERSION = 'v2';
+const CACHE = 'petrol-' + VERSION;
 const SHELL = [
   '/',
   '/static/icons/icon-192.png',
@@ -8,10 +10,10 @@ const SHELL = [
 ];
 
 self.addEventListener('install', e => {
+  // НЕ вызываем skipWaiting автоматически — ждём команды от страницы,
+  // чтобы показать пользователю баннер «доступно обновление».
   e.waitUntil(
-    caches.open(CACHE)
-      .then(c => c.addAll(SHELL).catch(() => {}))
-      .then(() => self.skipWaiting())
+    caches.open(CACHE).then(c => c.addAll(SHELL).catch(() => {}))
   );
 });
 
@@ -21,6 +23,11 @@ self.addEventListener('activate', e => {
       .then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
+});
+
+// Страница просит активировать новый SW немедленно.
+self.addEventListener('message', e => {
+  if (e.data === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('fetch', e => {

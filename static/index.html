@@ -82,6 +82,19 @@
     width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
     font-size: 10px; font-weight: 700; color: #fff; }
   .empty { padding: 30px; text-align: center; color: var(--muted); }
+  .update-bar {
+    position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+    background: var(--accent); color: #fff; border-radius: 12px;
+    padding: 12px 16px; display: none; align-items: center; gap: 14px;
+    box-shadow: 0 6px 24px rgba(0,0,0,.5); z-index: 9999; font-size: 14px;
+    max-width: calc(100vw - 32px);
+  }
+  .update-bar.show { display: flex; }
+  .update-bar button {
+    background: #fff; color: var(--accent); border: none; font-weight: 700;
+    padding: 7px 14px; border-radius: 8px; cursor: pointer; white-space: nowrap;
+  }
+  .update-bar .x { background: transparent; color: #fff; padding: 4px 8px; font-weight: 400; }
   @media (max-width: 820px) {
     .main { grid-template-columns: 1fr; grid-template-rows: 45vh 1fr; }
     .list { border-left: none; border-top: 1px solid var(--border); }
@@ -110,6 +123,12 @@
 <div class="main">
   <div id="map"></div>
   <div class="list" id="list"></div>
+</div>
+
+<div class="update-bar" id="updateBar">
+  <span>🔄 Доступна новая версия</span>
+  <button id="updateBtn">Обновить</button>
+  <button class="x" id="updateDismiss">✕</button>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -276,15 +295,66 @@ document.getElementById('refreshBtn').onclick = async function() {
   }
 };
 
+async function loadVersion() {
+  try {
+    const d = await (await fetch(API + '/version')).json();
+    document.title = `Petrol v${d.version} — цены на топливо в Иваново`;
+  } catch (_) { /* не критично */ }
+}
+
 (async function() {
   initMap();
+  await loadVersion();
   await loadSummary();
   await loadStations();
 })();
 
+// ===== Обновление приложения (PWA) =====
+function showUpdateBar(worker) {
+  const bar = document.getElementById('updateBar');
+  bar.classList.add('show');
+  document.getElementById('updateBtn').onclick = () => {
+    // просим новый SW активироваться; перезагрузка — по controllerchange
+    worker.postMessage('SKIP_WAITING');
+    document.getElementById('updateBtn').textContent = '⏳';
+  };
+  document.getElementById('updateDismiss').onclick = () => bar.classList.remove('show');
+}
+
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () =>
-    navigator.serviceWorker.register('/sw.js').catch(() => {}));
+  window.addEventListener('load', async () => {
+    try {
+      const reg = await navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' });
+
+      // уже есть ожидающий SW (обновление пришло между сессиями)
+      if (reg.waiting && navigator.serviceWorker.controller) showUpdateBar(reg.waiting);
+
+      // новый SW начал устанавливаться
+      reg.addEventListener('updatefound', () => {
+        const nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', () => {
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+            showUpdateBar(nw);
+          }
+        });
+      });
+
+      // когда новый SW взял управление — один раз перезагружаем
+      let reloaded = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (reloaded) return;
+        reloaded = true;
+        window.location.reload();
+      });
+
+      // периодически проверять обновления (раз в час) + при возврате на вкладку
+      setInterval(() => reg.update().catch(() => {}), 3600000);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reg.update().catch(() => {});
+      });
+    } catch (_) { /* SW недоступен — приложение работает без офлайна */ }
+  });
 }
 </script>
 </body>
