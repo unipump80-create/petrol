@@ -139,3 +139,9 @@ def price_history(station_id: int, fuel_type: str, days: int = 30, db: Session =
             "avg": sum(h.price for h in history) / len(history) if history else None,
         } if history else None
     }
+
+
+@router.get("/cache/stats")
+def get_cache_stats():
+    """Статистика кэша."""
+    return cache_stats()
