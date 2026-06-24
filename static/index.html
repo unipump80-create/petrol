@@ -147,6 +147,9 @@ let map, markers = {}, stations = [], sortBy = 'price', curFuel = 'ai95';
 let showUnavail = true; // показывать ли АЗС без выбранного топлива (серым)
 let showOnlyGazprom = false; // только Газпромнефть
 let swRegistration = null;    // регистрация Service Worker (для кнопки обновления)
+let citySummaryHTML = '';     // HTML сводки по городу — для восстановления после hover
+let hoverId = null;           // id станции, на которую сейчас наведено
+const stationDetailCache = {}; // id -> {код_топлива: цена}
 const GRAY = '#8b92a0';
 
 function fuelName() {
@@ -205,7 +208,7 @@ async function loadSummary() {
       count: info.stations
     }));
     box.innerHTML = fuels.map(f => `
-      <div class="scard">
+      <div class="scard" data-fuel="${f.code}">
         <div class="ft">${f.name}</div>
         <div class="avg">${f.avg?.toFixed(2) || '—'} ₽</div>
         <div class="mm">${f.min?.toFixed(2) || '—'} – ${f.max?.toFixed(2) || '—'} · ${f.count} АЗС</div>
@@ -216,7 +219,7 @@ async function loadSummary() {
   } else {
     // Обычный формат для всех АЗС
     box.innerHTML = d.fuels.map(f => `
-      <div class="scard">
+      <div class="scard" data-fuel="${f.fuel_type}">
         <div class="ft">${f.fuel_name}</div>
         <div class="avg">${f.avg.toFixed(2)} ₽</div>
         <div class="mm">${f.min} – ${f.max} · ${f.count} АЗС</div>
@@ -228,6 +231,53 @@ async function loadSummary() {
     else if (d.fuels[0]) curFuel = d.fuels[0].fuel_type, sel.value = curFuel;
   }
   curFuel = document.getElementById('fuel').value;
+  citySummaryHTML = box.innerHTML;  // запомнить сводку по городу для восстановления
+}
+
+// Полный набор цен станции по коду топлива. В режиме Газпромнефти цены уже
+// есть в объекте; иначе тянем детали /stations/{id} (с кэшем).
+async function stationPrices(s) {
+  if (s.prices && typeof s.prices === 'object' && !Array.isArray(s.prices)) {
+    return s.prices;  // gazprom-режим: {код: цена}
+  }
+  if (stationDetailCache[s.id]) return stationDetailCache[s.id];
+  try {
+    const d = await (await fetch(`${API}/stations/${s.id}`)).json();
+    const map = {};
+    (d.prices || []).forEach(p => { map[p.fuel_type] = p.price; });
+    stationDetailCache[s.id] = map;
+    return map;
+  } catch (_) { return {}; }
+}
+
+// Показать в карточках сводки цены конкретной станции (по наведению).
+function applyStationSummary(s, pricesByFuel) {
+  const fuels = new Set(s.fuel_types || []);
+  document.querySelectorAll('#summary .scard').forEach(card => {
+    const code = card.dataset.fuel;
+    const avgEl = card.querySelector('.avg');
+    const mmEl = card.querySelector('.mm');
+    const price = pricesByFuel[code];
+    if (price != null) {
+      avgEl.textContent = price.toFixed(2) + ' ₽';
+    } else if (fuels.has(code)) {
+      avgEl.textContent = 'есть · н/д';   // топливо есть, цены нет
+    } else {
+      avgEl.textContent = 'нет';          // топливо не продаётся
+    }
+    mmEl.textContent = s.name || 'АЗС';
+  });
+}
+
+// Навести/убрать — обновить сводку под станцию или вернуть городскую.
+async function hoverStation(s) {
+  hoverId = s.id;
+  const prices = await stationPrices(s);
+  if (hoverId === s.id) applyStationSummary(s, prices);  // ещё наведено
+}
+function unhoverStation() {
+  hoverId = null;
+  if (citySummaryHTML) document.getElementById('summary').innerHTML = citySummaryHTML;
 }
 
 async function loadStations() {
@@ -318,16 +368,23 @@ function render() {
       : `<span style="color:#888">нет ${fname}</span>`;
     m.bindPopup(`<b>${s.name||'АЗС'}</b><br>${s.brand||''}<br>${s.address||''}<br>${info}`);
     m.on('click', () => selectRow(s.id));
+    m.on('mouseover', () => hoverStation(s));
+    m.on('mouseout', unhoverStation);
     markers[s.id] = m;
   });
 
   list.querySelectorAll('.row').forEach(row => {
+    const id = +row.dataset.id;
+    const s = stations.find(x => x.id === id);
     row.onclick = () => {
-      const id = +row.dataset.id;
-      const s = stations.find(x => x.id === id);
       if (s && s.lat) { map.setView([s.lat, s.lon], 15); markers[id]?.openPopup(); }
       selectRow(id);
     };
+    // наведение на строку — показать цены этой АЗС в сводке
+    if (s) {
+      row.onmouseenter = () => hoverStation(s);
+      row.onmouseleave = unhoverStation;
+    }
   });
 }
 
