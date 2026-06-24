@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
+from app.services.cache import cache_get, cache_set, cache_stats, Depends
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -16,6 +17,9 @@ router = APIRouter(prefix="/prices", tags=["prices"])
 @router.get("/summary", response_model=PricesSummary)
 def prices_summary(db: Session = Depends(get_db)):
     """Сводка по городу: мин/средн/макс по каждому виду топлива."""
+    cached = cache_get("summary")
+    if cached:
+        return cached
     rows = (
         db.query(
             Price.fuel_type,
@@ -40,12 +44,14 @@ def prices_summary(db: Session = Depends(get_db)):
     ]
     fuels.sort(key=lambda f: f.fuel_type)
 
-    return PricesSummary(
+    result = PricesSummary(
         city="Иваново",
         stations=db.query(Station).count(),
         fuels=fuels,
         updated_at=db.query(func.max(Price.observed_at)).scalar(),
     )
+    cache_set("summary", result, ttl_seconds=300)
+    return result
 
 
 @router.get("/gazprom/availability")
