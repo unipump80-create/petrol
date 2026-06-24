@@ -210,8 +210,8 @@ async function loadSummary() {
     box.innerHTML = fuels.map(f => `
       <div class="scard" data-fuel="${f.code}">
         <div class="ft">${f.name}</div>
-        <div class="avg">${f.avg?.toFixed(2) || '—'} ₽</div>
-        <div class="mm">${f.min?.toFixed(2) || '—'} – ${f.max?.toFixed(2) || '—'} · ${f.count} АЗС</div>
+        <div class="avg">—</div>
+        <div class="mm">наведите на АЗС</div>
       </div>`).join('');
     const sel = document.getElementById('fuel');
     sel.innerHTML = Object.keys(d.fuel_types || {}).map(code =>
@@ -221,8 +221,8 @@ async function loadSummary() {
     box.innerHTML = d.fuels.map(f => `
       <div class="scard" data-fuel="${f.fuel_type}">
         <div class="ft">${f.fuel_name}</div>
-        <div class="avg">${f.avg.toFixed(2)} ₽</div>
-        <div class="mm">${f.min} – ${f.max} · ${f.count} АЗС</div>
+        <div class="avg">—</div>
+        <div class="mm">наведите на АЗС</div>
       </div>`).join('');
     const sel = document.getElementById('fuel');
     sel.innerHTML = d.fuels.map(f =>
