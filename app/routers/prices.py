@@ -80,3 +80,13 @@ def get_source():
             "cons": ["требует Playwright", "медленнее"]
         }
     }
+
+
+@router.get("/health")
+def data_health(db: Session = Depends(get_db)):
+    """Проверка здоровья данных."""
+    from app.services.validator import health_check
+    from app.models import Station
+    
+    stations = db.query(Station).all()
+    return health_check(stations)
