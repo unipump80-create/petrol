@@ -41,15 +41,13 @@ def test_parse_date_valid():
     assert _parse_date("15.03.2026") == datetime(2026, 3, 15)
 
 
-def test_parse_date_invalid_falls_back_to_now():
-    before = datetime.utcnow()
-    result = _parse_date("не дата")
-    assert result >= before
+def test_parse_date_invalid_returns_none():
+    """Нераспознанная дата -> None, НЕ фейковая «сегодня»."""
+    assert _parse_date("не дата") is None
 
 
-def test_parse_date_none_falls_back_to_now():
-    before = datetime.utcnow()
-    assert _parse_date(None) >= before
+def test_parse_date_none_returns_none():
+    assert _parse_date(None) is None
 
 
 # ---- свежесть ----

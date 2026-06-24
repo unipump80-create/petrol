@@ -1,18 +1,19 @@
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class PriceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     fuel_type: str
     fuel_name: str
     price: float
-    observed_at: datetime
-
-    class Config:
-        from_attributes = True
+    observed_at: datetime | None
 
 
 class StationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     brand: str | None
     name: str | None
@@ -23,12 +24,11 @@ class StationOut(BaseModel):
     fuel_types: list[str] | None
     prices: list[PriceOut]
 
-    class Config:
-        from_attributes = True
-
 
 class StationListItem(BaseModel):
     """Лёгкий вид для списка/карты: одна цена по выбранному топливу."""
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     brand: str | None
     name: str | None
@@ -41,9 +41,6 @@ class StationListItem(BaseModel):
     observed_at: datetime | None  # когда цена обновлена в источнике
     days_old: int | None  # сколько дней назад
     freshness: str | None  # fresh | recent | stale
-
-    class Config:
-        from_attributes = True
 
 
 class FuelSummary(BaseModel):

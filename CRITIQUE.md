@@ -17,31 +17,33 @@
 4. **Нулевое тестовое покрытие при «зелёном» CI.** Файлов тестов не было →
    `pytest` возвращает код 5 → GitHub Action падал вхолостую. Теперь 37 тестов.
 
-## Открытые проблемы (не трогал — нужно решение)
+## Закрыто во второй сессии
 
 ### Безопасность / злоупотребление
-- **`POST /stations/refresh` без авторизации.** Любой может дёргать его в цикле →
-  сервер парсит russiabase → бан IP источника + расход ресурсов (DoS-усиление).
-  Нужен ключ/rate-limit. [stations.py:13](app/routers/stations.py)
-- **CORS `allow_origins=["*"]` + `allow_credentials=True`.** Противоречиво и
-  чрезмерно: любой сайт ходит в API. Сузить до своего домена. [main.py:31](app/main.py)
+- **`POST /stations/refresh` — троттлинг** раз в `REFRESH_MIN_INTERVAL` (300 с),
+  иначе 429 + `Retry-After`. Защита источника от долбёжки. [stations.py](app/routers/stations.py)
+- **CORS сужен:** `allow_credentials=False` (кук нет — wildcard теперь валиден),
+  домены настраиваются через `CORS_ORIGINS`, методы только GET/POST. [main.py](app/main.py)
 
 ### Качество данных
-- **`_parse_date` молча подставляет `utcnow()` при ошибке парсинга.**
-  Если источник сменит формат даты — все АЗС покажут «обновлено сегодня»
-  (ложная свежесть). Лучше оставлять `None`/старую дату. [russiabase_loader.py:71](app/services/russiabase_loader.py)
-- **Нет уникального ограничения на `Price(station_id, fuel_type)`.** Защита только
-  через delete-then-insert; сбой/гонка при `refresh` → дубли цен. [models.py:38](app/models.py)
+- **`_parse_date` → `None`** при нераспознанной дате (+ лог), больше не подделывает
+  «сегодня». `observed_at` сделан nullable. [russiabase_loader.py](app/services/russiabase_loader.py)
+- **`UniqueConstraint(station_id, fuel_type)`** на `Price` — защита от дублей. [models.py](app/models.py)
 
 ### Tech debt
-- **`datetime.utcnow()` (deprecated)** по всему коду — сломается на будущих Python.
-- **Pydantic v1 `class Config`** в схемах — deprecated в v2. [schemas.py](app/schemas.py)
-- **Наивный UTC vs локальные даты источника** — свежесть может врать на ±1 день.
+- **`datetime.utcnow()` → `app.utils.utcnow()`** (наивный UTC), deprecation убран.
+- **Pydantic v2 `ConfigDict` / `SettingsConfigDict`** вместо `class Config`.
+- Проверено `python -W error::DeprecationWarning` — варнингов нет.
 
-### Масштабирование / UX
-- **`GET /stations` без пагинации/лимита.** ОК на 51 АЗС, ляжет на тысячах.
-- **Фронт без обработки ошибок сети.** Если API недоступен — пустой экран
-  без сообщения. [index.html](static/index.html)
+### UX
+- **Фронт обрабатывает ошибки:** сообщение при недоступном API, 429 на кнопке
+  «Обновить». [index.html](static/index.html)
+
+## Осталось (осознанно не делал)
+- **Пагинация `GET /stations`** — не нужна на 51 АЗС; добавить при росте до тысяч.
+- **Миграция БД под `UniqueConstraint`** — `create_all` не меняет существующую
+  таблицу на Render. Применится на чистом деплое; для текущей БД нужен ALTER/пересоздание.
+  Дублей сейчас нет (delete-then-insert), так что не срочно.
 
 ## Тесты
 

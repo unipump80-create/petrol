@@ -1,9 +1,10 @@
-from datetime import datetime
 from sqlalchemy import (
-    Column, Integer, String, Float, DateTime, JSON, ForeignKey, Index
+    Column, Integer, String, Float, DateTime, JSON, ForeignKey, Index,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from app.database import Base
+from app.utils import utcnow
 
 
 class Station(Base):
@@ -20,7 +21,7 @@ class Station(Base):
     opening_hours = Column(String, nullable=True)  # из OSM
     fuel_types = Column(JSON)  # коды доступного топлива ["ai92","ai95","diesel"]
     source = Column(String, default="russiabase")
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     prices = relationship("Price", back_populates="station", cascade="all, delete-orphan")
 
@@ -42,9 +43,15 @@ class Price(Base):
     station_id = Column(Integer, ForeignKey("stations.id"), index=True)
     fuel_type = Column(String, index=True)  # код топлива
     price = Column(Float)
-    observed_at = Column(DateTime, default=datetime.utcnow, index=True)
+    # nullable: если источник дал нераспознаваемую дату — храним NULL,
+    # а не фейковую «сегодня» (см. _parse_date)
+    observed_at = Column(DateTime, default=utcnow, index=True, nullable=True)
     source = Column(String, default="russiabase")
 
     station = relationship("Station", back_populates="prices")
 
-    __table_args__ = (Index("ix_prices_station_fuel", "station_id", "fuel_type"),)
+    __table_args__ = (
+        Index("ix_prices_station_fuel", "station_id", "fuel_type"),
+        # одна цена на (станция, топливо) — защита от дублей при гонке refresh
+        UniqueConstraint("station_id", "fuel_type", name="uq_price_station_fuel"),
+    )

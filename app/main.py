@@ -45,9 +45,10 @@ app = FastAPI(title="Petrol", version=APP_VERSION, debug=settings.debug, lifespa
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=settings.cors_origin_list,
+    # credentials не используем (нет кук/сессий) — и с wildcard это невалидно
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 

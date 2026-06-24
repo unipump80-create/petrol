@@ -68,13 +68,18 @@ def fetch_ivanovo() -> tuple[list[dict], dict]:
     return ivanovo, coords
 
 
-def _parse_date(value: str | None) -> datetime:
+def _parse_date(value: str | None) -> datetime | None:
+    """Дата наблюдения цены или None.
+
+    None при отсутствии/нераспознаваемом формате — НЕ подставляем utcnow(),
+    иначе протухшие данные выглядят как «обновлено сегодня».
+    """
     if value:
         try:
             return datetime.strptime(value, "%d.%m.%Y")
         except ValueError:
-            pass
-    return datetime.utcnow()
+            logger.warning("russiabase: не распарсил дату %r", value)
+    return None
 
 
 def load_ivanovo(db: Session) -> tuple[int, int]:

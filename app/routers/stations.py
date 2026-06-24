@@ -6,13 +6,31 @@ from app.models import Station, Price
 from app.schemas import StationOut, StationListItem, PriceOut
 from app.services.fuel_codes import FUEL_TYPES
 from app.services.russiabase_loader import load_ivanovo
+from app.config import settings
+from app.utils import utcnow
 
 router = APIRouter(prefix="/stations", tags=["stations"])
+
+# Троттлинг refresh: не парсить источник чаще, чем раз в N секунд (на весь сервер).
+# Защита от злоупотребления — иначе любой может дёргать парсер в цикле.
+_last_refresh: datetime | None = None
 
 
 @router.post("/refresh")
 def refresh(db: Session = Depends(get_db)):
-    """Ручное обновление данных из источника."""
+    """Ручное обновление данных из источника (с троттлингом)."""
+    global _last_refresh
+    now = utcnow()
+    if _last_refresh is not None:
+        elapsed = (now - _last_refresh).total_seconds()
+        if elapsed < settings.refresh_min_interval:
+            retry = int(settings.refresh_min_interval - elapsed)
+            raise HTTPException(
+                status_code=429,
+                detail=f"Слишком часто. Повторите через {retry} с.",
+                headers={"Retry-After": str(retry)},
+            )
+    _last_refresh = now
     ns, npr = load_ivanovo(db)
     return {"stations": ns, "prices": npr}
 
@@ -25,7 +43,7 @@ def freshness_of(observed_at: datetime | None) -> tuple[int | None, str | None]:
     """Возвращает (дней_назад, статус: fresh|recent|stale)."""
     if observed_at is None:
         return None, None
-    days = (datetime.utcnow() - observed_at).days
+    days = (utcnow() - observed_at).days
     if days <= FRESH_DAYS:
         status = "fresh"
     elif days <= RECENT_DAYS:
@@ -61,7 +79,8 @@ def list_stations(
                 price = match.price
                 observed = match.observed_at
         elif st.prices:
-            observed = max(p.observed_at for p in st.prices)
+            dates = [p.observed_at for p in st.prices if p.observed_at]
+            observed = max(dates) if dates else None
         days_old, fresh = freshness_of(observed)
         items.append(StationListItem(
             id=st.id, brand=st.brand, name=st.name, address=st.address,

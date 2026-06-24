@@ -1,4 +1,5 @@
 """Тесты HTTP-эндпоинтов."""
+import app.routers.stations as stations_router
 
 
 def test_health(client):
@@ -98,3 +99,17 @@ def test_station_detail(client, seeded):
 
 def test_station_404(client, seeded):
     assert client.get("/stations/999999").status_code == 404
+
+
+def test_refresh_throttled(client, monkeypatch):
+    """Второй refresh подряд -> 429 (защита источника от долбёжки)."""
+    monkeypatch.setattr(stations_router, "_last_refresh", None)
+    monkeypatch.setattr(stations_router, "load_ivanovo", lambda db: (5, 10))
+
+    first = client.post("/stations/refresh")
+    assert first.status_code == 200
+    assert first.json() == {"stations": 5, "prices": 10}
+
+    second = client.post("/stations/refresh")
+    assert second.status_code == 429
+    assert "Retry-After" in second.headers
