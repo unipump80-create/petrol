@@ -90,3 +90,15 @@ def data_health(db: Session = Depends(get_db)):
     
     stations = db.query(Station).all()
     return health_check(stations)
+
+
+@router.get("/stats")
+def get_stats(db: Session = Depends(get_db)):
+    """Полная статистика по данным."""
+    from app.services.stats import get_update_stats, get_brand_stats, get_fuel_availability
+    
+    return {
+        'updates': get_update_stats(db),
+        'brands': get_brand_stats(db),
+        'fuel_availability': get_fuel_availability(db),
+    }
