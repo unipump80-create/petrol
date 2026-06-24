@@ -53,6 +53,7 @@ def _ensure_data() -> None:
     from app.database import SessionLocal
     from app.models import Station
     from app.services.russiabase_loader import load_ivanovo
+    from app.services.cardoil_loader import enrich_availability
 
     log = logging.getLogger(__name__)
     db = SessionLocal()
@@ -62,6 +63,14 @@ def _ensure_data() -> None:
         log.info("БД пуста — загружаю данные из источника…")
         ns, npr = load_ivanovo(db)
         log.info("Стартовая загрузка: %d станций, %d цен", ns, npr)
+        # card-oil — источник истины наличия; обогащаем сразу при старте,
+        # иначе на free-тарифе (частые холодные старты) обогащение из
+        # планировщика (раз в 6 ч) фактически не успевает отработать.
+        try:
+            st = enrich_availability(db)
+            log.info("Стартовое обогащение card-oil: %s", st)
+        except Exception:
+            log.exception("Стартовое обогащение card-oil не удалось (наличие из russiabase)")
     except Exception:
         log.exception("Стартовая загрузка не удалась — пустая БД")
     finally:
