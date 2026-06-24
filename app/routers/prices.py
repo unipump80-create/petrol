@@ -62,3 +62,21 @@ def gazprom_locations(db: Session = Depends(get_db)):
         "count": len(locations),
         "stations": locations
     }
+
+
+@router.get("/source")
+def get_source():
+    """Текущий источник данных."""
+    from app.config import settings
+    return {
+        "source": settings.data_source,
+        "available": ["russiabase", "cardoil"],
+        "russiabase": {
+            "pros": ["быстро", "полные данные", "встроено"],
+            "cons": ["обновляется раз в 6 часов", "иногда неверное наличие"]
+        },
+        "cardoil": {
+            "pros": ["более свежие данные", "точное наличие топлива"],
+            "cons": ["требует Playwright", "медленнее"]
+        }
+    }

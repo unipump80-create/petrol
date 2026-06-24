@@ -3,6 +3,8 @@ import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from app.database import SessionLocal
 from app.services.russiabase_loader import load_ivanovo
+from app.services.cardoil_loader import load_cardoil_ivanovo
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -13,9 +15,13 @@ scheduler = BackgroundScheduler(timezone="Europe/Moscow")
 
 
 def refresh_job():
+    """Обновление данных из выбранного источника."""
     db = SessionLocal()
     try:
-        ns, np = load_ivanovo(db)
+        if settings.data_source == "cardoil":
+            ns, np = load_cardoil_ivanovo(db)
+        else:
+            ns, np = load_ivanovo(db)
         logger.info("refresh: %d станций, %d цен (включая Газпромнефть)", ns, np)
     except Exception:
         logger.exception("refresh: ошибка обновления данных")
