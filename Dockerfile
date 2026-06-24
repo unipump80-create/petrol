@@ -6,11 +6,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-ENV DATABASE_URL=sqlite:////tmp/petrol.db
+# БД в /app (writable-слой контейнера), НЕ в /tmp: на Render /tmp — tmpfs.
+# Данные грузятся при старте приложения (lifespan -> _ensure_data),
+# поэтому build не зависит от доступности источника.
+ENV DATABASE_URL=sqlite:////app/petrol.db
 ENV HOST=0.0.0.0
 ENV PORT=8000
-
-RUN python scripts/load_data.py
 
 EXPOSE 8000
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

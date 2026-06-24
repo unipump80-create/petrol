@@ -36,9 +36,36 @@ APP_VERSION = _resolve_version()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    _ensure_data()
     start_scheduler(run_now=False)
     yield
     stop_scheduler()
+
+
+def _ensure_data() -> None:
+    """Грузим данные при старте, если БД пуста.
+
+    На Render /tmp — tmpfs: запечённая на билде БД на рантайме недоступна,
+    поэтому полагаться на build-time load_data.py нельзя. Самозаполнение тут
+    гарантирует данные на любом холодном старте.
+    """
+    import logging
+    from app.database import SessionLocal
+    from app.models import Station
+    from app.services.russiabase_loader import load_ivanovo
+
+    log = logging.getLogger(__name__)
+    db = SessionLocal()
+    try:
+        if db.query(Station).count() > 0:
+            return
+        log.info("БД пуста — загружаю данные из источника…")
+        ns, npr = load_ivanovo(db)
+        log.info("Стартовая загрузка: %d станций, %d цен", ns, npr)
+    except Exception:
+        log.exception("Стартовая загрузка не удалась — пустая БД")
+    finally:
+        db.close()
 
 
 app = FastAPI(title="Petrol", version=APP_VERSION, debug=settings.debug, lifespan=lifespan)
