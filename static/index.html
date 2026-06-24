@@ -122,7 +122,8 @@
   <button id="sortName">по названию</button>
   <button id="showUnavail" class="active" style="margin-left:14px">⛔ где нет топлива</button>
   <button id="gazpromBtn" style="margin-left:8px">🔵 Газпромнефть</button>
-  <button id="refreshBtn" style="margin-left:8px">🔄 Обновить</button>
+  <button id="refreshBtn" style="margin-left:8px">🔄 Обновить данные</button>
+  <button id="appUpdateBtn" style="margin-left:8px" title="Проверить и установить новую версию приложения">⬆️ Обновить приложение</button>
   <span class="sub" id="count"></span>
 </div>
 
@@ -145,6 +146,7 @@ const IVANOVO = [57.0, 40.97];
 let map, markers = {}, stations = [], sortBy = 'price', curFuel = 'ai95';
 let showUnavail = true; // показывать ли АЗС без выбранного топлива (серым)
 let showOnlyGazprom = false; // только Газпромнефть
+let swRegistration = null;    // регистрация Service Worker (для кнопки обновления)
 const GRAY = '#8b92a0';
 
 function fuelName() {
@@ -400,6 +402,57 @@ document.getElementById('refreshBtn').onclick = async function() {
   }
 };
 
+// Кнопка «Обновить приложение» — проверяет и устанавливает новую версию PWA
+// (отдельно от обновления данных). Реальная установка идёт через Service Worker:
+// при наличии ожидающего SW активируем его → controllerchange → перезагрузка.
+document.getElementById('appUpdateBtn').onclick = async function() {
+  const btn = this;
+  const orig = btn.textContent;
+
+  // Браузер без Service Worker (или открыто не как PWA) — просто жёсткая
+  // перезагрузка с обходом кэша: иного механизма «обновить приложение» нет.
+  if (!('serviceWorker' in navigator)) {
+    btn.innerHTML = '<span class="spinner"></span> Перезагрузка…';
+    location.reload();
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Проверяю…';
+  try {
+    const reg = swRegistration || await navigator.serviceWorker.getRegistration();
+    if (!reg) {
+      btn.innerHTML = '<span class="spinner"></span> Перезагрузка…';
+      location.reload();
+      return;
+    }
+
+    await reg.update();  // спросить сервер про новую версию sw.js
+
+    // Если новый SW ещё устанавливается — дождёмся завершения установки.
+    if (reg.installing) {
+      const inst = reg.installing;
+      await new Promise(res => inst.addEventListener('statechange', () => {
+        if (inst.state === 'installed' || inst.state === 'redundant') res();
+      }));
+    }
+
+    if (reg.waiting) {
+      // есть готовая новая версия — активируем; перезагрузка по controllerchange
+      btn.innerHTML = '<span class="spinner"></span> Устанавливаю…';
+      reg.waiting.postMessage('SKIP_WAITING');
+      setTimeout(() => location.reload(), 3000);  // подстраховка
+    } else {
+      btn.textContent = '✓ Уже последняя версия';
+      setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2500);
+    }
+  } catch (e) {
+    console.error('Обновление приложения:', e);
+    btn.textContent = '⚠ Ошибка';
+    setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2500);
+  }
+};
+
 async function loadDataSource() {
   try {
     const d = await (await fetch(API + '/prices/source')).json();
@@ -497,6 +550,7 @@ if ('serviceWorker' in navigator) {
       appVersion = await checkAppVersion();
 
       const reg = await navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' });
+      swRegistration = reg;  // даём кнопке «Обновить приложение» доступ к регистрации
 
       // уже есть ожидающий SW (обновление пришло между сессиями)
       if (reg.waiting && navigator.serviceWorker.controller) {
