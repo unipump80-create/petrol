@@ -7,6 +7,7 @@ from app.schemas import StationOut, StationListItem, PriceOut
 from app.services.fuel_codes import FUEL_TYPES
 from app.services.russiabase_loader import load_ivanovo
 from app.services.cardoil_loader import enrich_availability
+from app.services.cache import cache_clear
 from app.config import settings
 from app.utils import utcnow
 
@@ -38,6 +39,7 @@ def refresh(db: Session = Depends(get_db)):
         enrich = enrich_availability(db)
     except Exception:
         pass  # наличие останется из russiabase
+    cache_clear()  # сбросить кэш сводки — иначе /prices/summary отдаёт старое
     return {"stations": ns, "prices": npr, "cardoil": enrich}
 
 # Пороги свежести данных (дни)

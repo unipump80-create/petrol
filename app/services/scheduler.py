@@ -4,6 +4,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.database import SessionLocal
 from app.services.russiabase_loader import load_ivanovo
 from app.services.cardoil_loader import enrich_availability
+from app.services.cache import cache_clear
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ def refresh_job():
             enrich_availability(db)
         except Exception:
             logger.exception("refresh: card-oil обогащение не удалось (наличие из russiabase)")
+        cache_clear()  # сводка пересчитается на следующем запросе
     except Exception:
         logger.exception("refresh: ошибка обновления данных")
     finally:
