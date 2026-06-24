@@ -116,6 +116,7 @@
   <button id="sortPrice" class="active">по цене</button>
   <button id="sortName">по названию</button>
   <button id="showUnavail" class="active" style="margin-left:14px">⛔ где нет топлива</button>
+  <button id="gazpromBtn" style="margin-left:8px">🔵 Газпромнефть</button>
   <button id="refreshBtn" style="margin-left:8px">🔄 Обновить</button>
   <span class="sub" id="count"></span>
 </div>
@@ -138,6 +139,7 @@ const API = (window.PETROL_API || '').replace(/\/$/, '');
 const IVANOVO = [57.0, 40.97];
 let map, markers = {}, stations = [], sortBy = 'price', curFuel = 'ai95';
 let showUnavail = true; // показывать ли АЗС без выбранного топлива (серым)
+let showOnlyGazprom = false; // только Газпромнефть
 const GRAY = '#8b92a0';
 
 function fuelName() {
@@ -173,28 +175,89 @@ function initMap() {
 }
 
 async function loadSummary() {
-  const d = await (await fetch(API + '/prices/summary')).json();
-  document.getElementById('upd').textContent =
-    'обновлено: ' + (d.updated_at ? d.updated_at.slice(0,10) : '—') + ` · ${d.stations} АЗС`;
+  let d;
+  if (showOnlyGazprom) {
+    d = await (await fetch(API + '/prices/gazprom/availability')).json();
+    document.getElementById('upd').textContent = `Газпромнефть · ${d.total_stations} АЗС`;
+  } else {
+    d = await (await fetch(API + '/prices/summary')).json();
+    document.getElementById('upd').textContent =
+      'обновлено: ' + (d.updated_at ? d.updated_at.slice(0,10) : '—') + ` · ${d.stations} АЗС`;
+  }
+
   const box = document.getElementById('summary');
-  box.innerHTML = d.fuels.map(f => `
-    <div class="scard">
-      <div class="ft">${f.fuel_name}</div>
-      <div class="avg">${f.avg.toFixed(2)} ₽</div>
-      <div class="mm">${f.min} – ${f.max} · ${f.count} АЗС</div>
-    </div>`).join('');
-  const sel = document.getElementById('fuel');
-  sel.innerHTML = d.fuels.map(f =>
-    `<option value="${f.fuel_type}">${f.fuel_name}</option>`).join('');
-  if (d.fuels.find(f => f.fuel_type === 'ai95')) sel.value = 'ai95';
-  else if (d.fuels[0]) curFuel = d.fuels[0].fuel_type, sel.value = curFuel;
-  curFuel = sel.value;
+
+  if (showOnlyGazprom) {
+    // Для Газпромнефти формат другой
+    const fuels = Object.entries(d.fuel_types || {}).map(([code, info]) => ({
+      code,
+      name: {ai92:'АИ-92', ai95:'АИ-95', ai98:'АИ-98', ai100:'АИ-100', diesel:'ДТ', gas:'Газ', ai95plus:'АИ-95+'}[code] || code,
+      avg: info.avg_price,
+      min: info.min_price,
+      max: info.max_price,
+      count: info.stations
+    }));
+    box.innerHTML = fuels.map(f => `
+      <div class="scard">
+        <div class="ft">${f.name}</div>
+        <div class="avg">${f.avg?.toFixed(2) || '—'} ₽</div>
+        <div class="mm">${f.min?.toFixed(2) || '—'} – ${f.max?.toFixed(2) || '—'} · ${f.count} АЗС</div>
+      </div>`).join('');
+    const sel = document.getElementById('fuel');
+    sel.innerHTML = Object.keys(d.fuel_types || {}).map(code =>
+      `<option value="${code}">${{ai92:'АИ-92', ai95:'АИ-95', ai98:'АИ-98', ai100:'АИ-100', diesel:'ДТ', gas:'Газ', ai95plus:'АИ-95+'}[code] || code}</option>`).join('');
+  } else {
+    // Обычный формат для всех АЗС
+    box.innerHTML = d.fuels.map(f => `
+      <div class="scard">
+        <div class="ft">${f.fuel_name}</div>
+        <div class="avg">${f.avg.toFixed(2)} ₽</div>
+        <div class="mm">${f.min} – ${f.max} · ${f.count} АЗС</div>
+      </div>`).join('');
+    const sel = document.getElementById('fuel');
+    sel.innerHTML = d.fuels.map(f =>
+      `<option value="${f.fuel_type}">${f.fuel_name}</option>`).join('');
+    if (d.fuels.find(f => f.fuel_type === 'ai95')) sel.value = 'ai95';
+    else if (d.fuels[0]) curFuel = d.fuels[0].fuel_type, sel.value = curFuel;
+  }
+  curFuel = document.getElementById('fuel').value;
 }
 
 async function loadStations() {
-  const url = `${API}/stations?fuel=${curFuel}&sort=${sortBy}`;
-  stations = await (await fetch(url)).json();
+  if (showOnlyGazprom) {
+    await loadGazpromStations();
+  } else {
+    const url = `${API}/stations?fuel=${curFuel}&sort=${sortBy}`;
+    stations = await (await fetch(url)).json();
+  }
   render();
+}
+
+async function loadGazpromStations() {
+  const d = await (await fetch(API + '/prices/gazprom/locations')).json();
+  // Преобразуем формат из API в формат для станций
+  stations = (d.stations || []).map(s => ({
+    id: s.id,
+    name: s.name,
+    address: s.address,
+    brand: 'Газпромнефть',
+    lat: s.lat,
+    lon: s.lon,
+    price: s.prices[curFuel],
+    available: curFuel in (s.prices || {}),
+    observed_at: null // Газпромнефть не имеет времени обновления в нашем формате
+  }));
+
+  // Сортируем по цене или имени
+  if (sortBy === 'price') {
+    stations.sort((a, b) => {
+      const pa = a.price !== undefined ? a.price : Infinity;
+      const pb = b.price !== undefined ? b.price : Infinity;
+      return pa - pb;
+    });
+  } else if (sortBy === 'name') {
+    stations.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }
 }
 
 function render() {
@@ -266,7 +329,13 @@ function selectRow(id) {
     r.classList.toggle('sel', +r.dataset.id === id));
 }
 
-document.getElementById('fuel').onchange = e => { curFuel = e.target.value; loadStations(); };
+document.getElementById('fuel').onchange = e => {
+  curFuel = e.target.value;
+  if (showOnlyGazprom) {
+    loadSummary();
+  }
+  loadStations();
+};
 document.getElementById('sortPrice').onclick = e => {
   sortBy = 'price'; setSortBtn(); loadStations(); };
 document.getElementById('sortName').onclick = e => {
@@ -280,6 +349,16 @@ document.getElementById('showUnavail').onclick = function() {
   showUnavail = !showUnavail;
   this.classList.toggle('active', showUnavail);
   render();
+};
+
+document.getElementById('gazpromBtn').onclick = function() {
+  showOnlyGazprom = !showOnlyGazprom;
+  this.classList.toggle('active', showOnlyGazprom);
+  if (showOnlyGazprom) {
+    document.getElementById('sortPrice').disabled = false;
+    document.getElementById('sortName').disabled = false;
+  }
+  loadStations();
 };
 
 document.getElementById('refreshBtn').onclick = async function() {
