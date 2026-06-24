@@ -29,7 +29,6 @@ BRAND_ALIASES = {
     "смарт-технологии": "Смарт-Технологии",
     "фьюел технолод": "Fuel",
     "промресурс": "Промресурс",
-    "альянс ойл": "Альянс Ойл",
     "mannol": "Mannol",
     "итк": "ИТК",
     "агнкс": "АГНКС",
@@ -56,10 +55,16 @@ def normalize_brand(raw: str | None) -> str | None:
 
     if key in BRAND_ALIASES:
         return BRAND_ALIASES[key]
+    # матч по границе слова, не по произвольной подстроке:
+    # иначе «опти» ловит «Оптима», «итк» ловит «ИТКОЛ» (разные бренды)
     for alias, canonical in BRAND_ALIASES.items():
-        if alias in key:
+        if re.search(r"\b" + re.escape(alias) + r"\b", key):
             return canonical
-    # ничего не нашли — вернём очищенное название с заглавной
+    # ничего не нашли — вернём очищенное название
     cleaned = raw.strip().strip(_QUOTES)
     cleaned = _PREFIX_RE.sub("", cleaned).strip().strip(_QUOTES)
-    return cleaned or raw.strip()
+    if cleaned:
+        return cleaned
+    # после чистки пусто (мусор/кавычки/юр.форма) — отдаём исходник или None,
+    # но НИКОГДА пустую строку: она ломает фильтр по бренду и UI
+    return raw.strip() or None

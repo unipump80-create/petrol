@@ -1,6 +1,6 @@
-// Service worker: офлайн-оболочка + кэш данных
-// Версию бампать при каждом релизе — иначе старый кэш не сбросится.
-const VERSION = 'v2';
+// Service worker: офлайн-оболочка + кэш данных.
+// __VERSION__ подставляет сервер (git-хеш деплоя) — бампать руками не нужно.
+const VERSION = '__VERSION__';
 const CACHE = 'petrol-' + VERSION;
 const SHELL = [
   '/',
