@@ -21,10 +21,13 @@ from app.services.brands import normalize_brand
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://russiabase.ru/prices"
-# Берём всю область и фильтруем по адресу: city=154051 узкий (теряет
-# половину АЗС Иваново, которые russiabase держит на страницах области).
+# Берём всю область и фильтруем географически по bbox города: city=154051
+# узкий (теряет половину городских АЗС), а фильтр по подстроке адреса
+# «иваново» ложно ловит трассы («Кострома-Иваново», «Иваново-Палех») и
+# «Ивановская обл.» — втягивал АЗС за 60-139 км. bbox совпадает с card-oil.
 REGION_IVANOVO = "38"
-CITY_NAME = "иваново"
+# (юг, север, запад, восток) — город Иваново + ближние пригороды
+IVANOVO_BBOX = (56.90, 57.15, 40.70, 41.25)
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
@@ -62,9 +65,19 @@ def fetch_ivanovo() -> tuple[list[dict], dict]:
             records.extend(pp["listing"]["listing"])
             for m in pp.get("listingMap", {}).get("listing", []):
                 coords[m["poiid"]] = m
-    # фильтр по городу: адрес содержит «Иваново»
-    # ('Ивановская обл.' не матчит — нет окончания '-ово')
-    ivanovo = [r for r in records if CITY_NAME in (r.get("address") or "").lower()]
+    # фильтр по городу: координаты станции внутри bbox Иванова.
+    # Надёжнее подстроки адреса — отсекает межгород/область, оставляет город.
+    south, north, west, east = IVANOVO_BBOX
+
+    def _in_city(poiid) -> bool:
+        geo = coords.get(str(poiid)) or coords.get(poiid) or {}
+        try:
+            lat = float(geo.get("Y")); lon = float(geo.get("X"))
+        except (TypeError, ValueError):
+            return False  # нет координат — на карту не поставить, для города пропускаем
+        return south < lat < north and west < lon < east
+
+    ivanovo = [r for r in records if _in_city(r.get("poiid"))]
     return ivanovo, coords
 
 

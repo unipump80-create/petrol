@@ -300,8 +300,10 @@ async function loadGazpromStations() {
     brand: 'Газпромнефть',
     lat: s.lat,
     lon: s.lon,
+    fuel_types: s.fuel_types || [],
     price: s.prices[curFuel],
-    available: curFuel in (s.prices || {}),
+    // наличие — по fuel_types (истина card-oil), не по факту наличия цены
+    available: (s.fuel_types || []).includes(curFuel),
     observed_at: null // Газпромнефть не имеет времени обновления в нашем формате
   }));
 
