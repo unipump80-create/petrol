@@ -1,0 +1,37 @@
+PETROL APK — БЫСТРЫЙ СТАРТ
+
+1. ВЫБЕРИ ХОСТИНГ:
+
+   A) HEROKU (бесплатный, 1 дайно):
+      bash deploy-heroku.sh petrol-ivanovo
+      Доступен 24/7 если платить после пробного периода
+
+   B) RENDER (бесплатный, постоянный):
+      - https://render.com → Sign up
+      - New → Web Service
+      - Connect GitHub repo (или git clone и ручной push)
+      - Environment: Python 3.12
+      - Build: pip install -r requirements.txt
+      - Start: uvicorn app.main:app --host 0.0.0.0 --port 8000
+      - Deploy
+      - Скопировать URL хоста
+
+   C) DOCKER локально:
+      docker build -t petrol .
+      docker run -p 8000:8000 petrol
+      http://localhost:8000
+
+2. СОБРАТЬ APK:
+   - https://www.pwabuilder.com
+   - Вставить URL хоста
+   - Build → Android → Download .apk
+   - Установить на Android
+
+3. НА ТЕЛЕФОНЕ:
+   - Скачанный .apk → Open → Install
+   - Или: Settings → Security → Unknown sources → Install
+   - Иконка "Petrol" на рабочем столе
+
+═══════════════════════════════════════
+Готов? Выполни команду в терминале:
+bash deploy-heroku.sh
