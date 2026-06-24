@@ -1,332 +1,129 @@
-"""Загрузчик АЗС и цен с card-oil.ru.
+"""Загрузчик наличия топлива с card-oil.ru.
 
-Card-oil.ru - агрегатор с более актуальными данными о наличии топлива.
-Используется вместо russiabase для получения более точной информации.
+Источник: статический JSON карты card-oil, который использует их веб-виджет
+(https://map.card-oil.ru). JS/Playwright НЕ нужны.
+
+  https://cdn2.card-oil.ru/map/FilterAZS.json   (~1.9 МБ, вся РФ)
+
+Структура — колоночная: {"headers": [...23 поля...], "data": [[...], ...]}.
+Поля топлива (DT, Ai92, Ai95, Ai98, Ai100, Gaz, Metan) — ФЛАГИ наличия 1/0.
+ЦЕН В ИСТОЧНИКЕ НЕТ — только наличие видов топлива, бренд, координаты.
+
+Поэтому card-oil даёт более точное «наличие», а цены берутся из russiabase.
 """
 import logging
 import httpx
-import json
-from datetime import datetime
 from sqlalchemy.orm import Session
-from app.models import Station, Price
+from app.models import Station
 from app.services.brands import normalize_brand
 
 logger = logging.getLogger(__name__)
 
-# Маппинг типов топлива card-oil → наша нотация
-FUEL_MAP = {
-    'АИ-92': 'ai92',
-    'АИ-95': 'ai95',
-    'АИ-98': 'ai98',
-    'АИ-100': 'ai100',
-    'ДТ': 'diesel',
-    'ДТ Euro': 'diesel',
-    'Газ': 'gas',
-    'Пропан': 'gas',
-    'АИ-95 Plus': 'ai95plus',
+POINTS_URL = "https://cdn2.card-oil.ru/map/FilterAZS.json"
+
+# bbox Иваново (юг, север, запад, восток)
+IVANOVO_BBOX = (56.90, 57.15, 40.70, 41.25)
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+}
+
+# Имя колонки в FilterAZS.json -> наш код топлива.
+# Несколько колонок могут мапиться в один код (Gaz/Metan -> gas).
+FUEL_COLUMNS = {
+    "DT": "diesel",
+    "Ai92": "ai92",
+    "Ai95": "ai95",
+    "Ai98": "ai98",
+    "Ai100": "ai100",
+    "Gaz": "gas",
+    "Metan": "gas",
 }
 
 
-async def fetch_cardoil_stations(city: str = 'ivanovo', brand: str = None) -> list[dict]:
-    """Получить станции с card-oil.ru.
-
-    Args:
-        city: код города (ivanovo, moscow, spb)
-        brand: фильтр по бренду (gazpromneft, lukoil, и т.д.)
+def fetch_cardoil_points(bbox: tuple[float, float, float, float] = IVANOVO_BBOX) -> list[dict]:
+    """Скачивает FilterAZS.json и возвращает АЗС внутри bbox.
 
     Returns:
-        Список станций с координатами и ценами
+        Список dict: {poiid, brand, lat, lon, fuel_types}.
+        fuel_types — отсортированный список кодов топлива с флагом наличия=1.
     """
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "application/json, text/javascript, */*",
-        "X-Requested-With": "XMLHttpRequest",
-    }
+    south, north, west, east = bbox
+    with httpx.Client(timeout=60, trust_env=False, headers=HEADERS,
+                      follow_redirects=True) as client:
+        resp = client.get(POINTS_URL)
+        resp.raise_for_status()
+        payload = resp.json()
 
-    stations = []
+    headers = payload["headers"]
+    idx = {name: i for i, name in enumerate(headers)}
+    i_id, i_brand = idx["ID"], idx["Brand"]
+    i_lat, i_lon = idx["latitude"], idx["longitude"]
 
-    try:
-        # URL для запроса станций
-        url = f"https://card-oil.ru/azs/{brand or 'gazpromneft'}/{city}/"
+    stations: list[dict] = []
+    for row in payload["data"]:
+        try:
+            lat = float(row[i_lat]); lon = float(row[i_lon])
+        except (TypeError, ValueError):
+            continue
+        if not (south < lat < north and west < lon < east):
+            continue
 
-        async with httpx.AsyncClient(timeout=30, headers=headers, follow_redirects=True) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
+        # собрать доступные виды топлива по флагам 1/0
+        fuels: set[str] = set()
+        for col, code in FUEL_COLUMNS.items():
+            if col in idx and row[idx[col]] == 1:
+                fuels.add(code)
+        if not fuels:
+            continue
 
-            # Парсим HTML для поиска JSON данных
-            html = resp.text
+        stations.append({
+            "poiid": f"cardoil_{row[i_id]}",
+            "brand": normalize_brand(str(row[i_brand])),
+            "lat": lat,
+            "lon": lon,
+            "fuel_types": sorted(fuels),
+        })
 
-            # Ищем данные о станциях в HTML
-            # card-oil использует JavaScript загрузку, ищем в атрибутах data-*
-            import re
-
-            # Попытка найти координаты и информацию о станциях
-            # Формат: data-lat="57.xxx" data-lon="41.xxx" и т.д.
-            station_pattern = r'data-lat="([^"]+)"[^>]*data-lon="([^"]+)"'
-
-            matches = re.finditer(station_pattern, html)
-            for match in matches:
-                lat, lon = match.groups()
-                # Получить контекст (название, адрес, цены) из этого же участка HTML
-                try:
-                    stations.append({
-                        'lat': float(lat),
-                        'lon': float(lon),
-                        'found': True  # флаг что нашли координаты
-                    })
-                except ValueError:
-                    continue
-
-            logger.info(f"cardoil: найдено {len(stations)} станций из HTML")
-
-    except Exception as e:
-        logger.error(f"cardoil: ошибка при парсинге: {e}")
-
+    logger.info("cardoil: %d АЗС в bbox (из %d по РФ)",
+                len(stations), len(payload["data"]))
     return stations
 
 
-def fetch_cardoil_sync(city: str = 'ivanovo', brand: str = 'gazpromneft') -> list[dict]:
-    """Синхронная версия для интеграции с БД.
-
-    На данный момент - заглушка, т.к. card-oil использует JS загрузку.
-    Требуется Playwright или Selenium для полного парсинга.
-    """
-    # Для полного функционала нужен Playwright:
-    # from playwright.sync_api import sync_playwright
-    #
-    # with sync_playwright() as p:
-    #     browser = p.chromium.launch()
-    #     page = browser.new_page()
-    #     page.goto(url)
-    #     page.wait_for_load_state('networkidle')
-    #     content = page.content()
-    #     ...
-
-    logger.warning("cardoil: используется облегченный парсинг без JS")
-    return []
-
-
 def load_cardoil_ivanovo(db: Session) -> tuple[int, int]:
-    """Загружает станции Газпромнефти с card-oil.ru.
+    """Загружает наличие топлива по АЗС Иванова из card-oil.
 
-    На данный момент card-oil.ru требует JS для полной загрузки.
-    Рекомендуется использовать russiabase как основной источник,
-    а card-oil для проверки актуальности данных.
-
-    Returns:
-        (количество_станций, количество_цен)
+    Возвращает (станций, 0) — цен у источника нет, второй элемент всегда 0
+    для совместимости с сигнатурой russiabase-загрузчика.
     """
-    logger.warning("cardoil: для полного функционала требуется Playwright")
-    logger.info("cardoil: используем russiabase как основной источник")
+    points = fetch_cardoil_points()
+    n = 0
+    seen = {p["poiid"] for p in points}
 
-    # Пока что просто логируем
-    # Для реального использования:
-    # 1. Установить: pip install playwright
-    # 2. python -m playwright install
-    # 3. Раскомментировать код выше
+    # снести станции card-oil, которых больше нет в источнике
+    stale = (
+        db.query(Station)
+        .filter(Station.poiid.like("cardoil_%"))
+        .filter(Station.poiid.notin_(seen))
+        .all()
+    )
+    for st in stale:
+        db.delete(st)
 
-    return 0, 0
+    for p in points:
+        station = db.query(Station).filter(Station.poiid == p["poiid"]).first()
+        if station is None:
+            station = Station(poiid=p["poiid"])
+            db.add(station)
+        station.brand = p["brand"]
+        station.name = p["brand"]  # источник не даёт отдельного имени/№
+        station.lat = p["lat"]
+        station.lon = p["lon"]
+        station.fuel_types = p["fuel_types"]
+        station.source = "cardoil"
+        n += 1
 
-
-# ===== Альтернатива: использовать API если доступно =====
-
-async def fetch_cardoil_api(city: str = 'ivanovo') -> dict:
-    """Попытка получить данные через внутренний API card-oil.
-
-    Если найдём публичный API - будет работать.
-    Иначе - требуется обратный инжиниринг или Playwright.
-    """
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            # Возможные API endpoints
-            endpoints = [
-                f"https://card-oil.ru/api/stations?city={city}",
-                f"https://api.card-oil.ru/stations?city={city}",
-                f"https://card-oil.ru/api/v1/gas-stations?city={city}",
-            ]
-
-            for endpoint in endpoints:
-                try:
-                    resp = await client.get(endpoint)
-                    if resp.status_code == 200:
-                        return resp.json()
-                except Exception:
-                    continue
-
-    except Exception as e:
-        logger.debug(f"cardoil API: {e}")
-
-    return {}
-
-
-# ===== Гибридный подход =====
-
-class CardOilLoader:
-    """Интеллектуальный загрузчик данных с card-oil.ru.
-
-    Стратегия:
-    1. Если доступен API - используем его
-    2. Если нужен JS парсинг - используем Playwright (если установлен)
-    3. Если ничего - используем russiabase + логируем что card-oil недоступен
-
-    По мере развития можем переключиться полностью на card-oil.
-    """
-
-    def __init__(self):
-        self.has_playwright = self._check_playwright()
-        self.last_update = None
-
-    def _check_playwright(self) -> bool:
-        """Проверить доступность Playwright."""
-        try:
-            import playwright
-            return True
-        except ImportError:
-            return False
-
-    async def load(self, city: str = 'ivanovo', brand: str = 'gazpromneft'):
-        """Загрузить данные с лучшей доступной стратегией."""
-        if self.has_playwright:
-            return await self._load_with_playwright(city, brand)
-        else:
-            logger.info("cardoil: Playwright не установлен, используем russiabase")
-            return None
-
-    async def _load_with_playwright(self, city: str, brand: str):
-        """Загрузить через Playwright (требует установки)."""
-        try:
-            from playwright.async_api import async_playwright
-
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
-                page = await browser.new_page()
-                url = f"https://card-oil.ru/azs/{brand}/{city}/"
-                await page.goto(url, wait_until='networkidle')
-
-                # Парсим данные после загрузки JS
-                stations = await page.evaluate('''
-                    () => {
-                        const items = document.querySelectorAll('[data-lat]');
-                        return Array.from(items).map(el => ({
-                            name: el.querySelector('.name')?.textContent || '',
-                            address: el.querySelector('.address')?.textContent || '',
-                            lat: parseFloat(el.dataset.lat),
-                            lon: parseFloat(el.dataset.lon),
-                            fuels: Array.from(el.querySelectorAll('.fuel'))
-                                .map(f => f.dataset.code)
-                        }));
-                    }
-                ''')
-
-                await browser.close()
-                self.last_update = datetime.now()
-                return stations
-
-        except Exception as e:
-            logger.error(f"cardoil playwright: {e}")
-            return None
-
-
-async def fetch_all_brands_ivanovo() -> list[str]:
-    """Получить список всех доступных брендов на card-oil.ru для Иванова."""
-    brands = [
-        'gazpromneft',
-        'lukoil', 
-        'tatnefit',
-        'surgutneftegaz',
-        'rosneft',
-        'itera',
-        'esso',
-        'shell',
-        'azneft',
-    ]
-    return brands
-
-
-async def fetch_cardoil_all_brands(city: str = 'ivanovo') -> dict:
-    """Загрузить АЗС всех брендов с card-oil.ru."""
-    all_stations = {}
-    brands = await fetch_all_brands_ivanovo()
-
-    for brand in brands:
-        try:
-            stations = await fetch_cardoil_stations(city, brand)
-            if stations:
-                all_stations[brand] = stations
-                logger.info(f"cardoil: {brand} — {len(stations)} станций")
-        except Exception as e:
-            logger.warning(f"cardoil: {brand} — ошибка: {e}")
-
-    return all_stations
-
-
-def load_cardoil_all_brands(db: Session, city: str = 'ivanovo') -> tuple[int, int]:
-    """Загружает АЗС всех брендов с card-oil.ru и сохраняет в БД.
-    
-    Требует Playwright для полного функционала.
-    Без Playwright - логирует warning и возвращает 0.
-    """
-    import asyncio
-    
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        logger.warning("cardoil: Playwright не установлен")
-        logger.info("cardoil: для полной загрузки установи: pip install playwright")
-        return 0, 0
-    
-    all_stations = 0
-    all_prices = 0
-    brands = [
-        'gazpromneft', 'lukoil', 'tatnefit', 'surgutneftegaz', 
-        'rosneft', 'itera', 'esso', 'shell', 'azneft'
-    ]
-    
-    with sync_playwright() as p:
-        for brand in brands:
-            try:
-                browser = p.chromium.launch(headless=True)
-                page = browser.new_page()
-                url = f"https://card-oil.ru/azs/{brand}/{city}/"
-                
-                page.goto(url, wait_until='networkidle', timeout=30000)
-                
-                # Получаем данные со страницы
-                data = page.evaluate("""
-                    () => {
-                        const stations = [];
-                        document.querySelectorAll('[data-lat]').forEach(el => {
-                            stations.push({
-                                name: el.querySelector('.name')?.textContent || '',
-                                address: el.querySelector('.address')?.textContent || '',
-                                lat: parseFloat(el.dataset.lat),
-                                lon: parseFloat(el.dataset.lon),
-                            });
-                        });
-                        return stations;
-                    }
-                """)
-                
-                # Сохраняем в БД
-                for station_data in data:
-                    if station_data['lat'] and station_data['lon']:
-                        station = Station(
-                            poiid=f"{brand}_{station_data['name']}",
-                            brand=brand.capitalize(),
-                            name=station_data['name'],
-                            address=station_data['address'],
-                            lat=station_data['lat'],
-                            lon=station_data['lon'],
-                            source='cardoil'
-                        )
-                        db.add(station)
-                        all_stations += 1
-                
-                db.commit()
-                logger.info(f"cardoil: {brand} — {len(data)} станций")
-                browser.close()
-                
-            except Exception as e:
-                logger.warning(f"cardoil: {brand} — {e}")
-    
-    return all_stations, 0
+    db.commit()
+    logger.info("cardoil: загружено/обновлено %d станций (без цен)", n)
+    return n, 0
