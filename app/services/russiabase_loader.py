@@ -25,6 +25,10 @@ BASE_URL = "https://russiabase.ru/prices"
 # половину АЗС Иваново, которые russiabase держит на страницах области).
 REGION_IVANOVO = "38"
 CITY_NAME = "иваново"
+# Закрытые АЗС (нет топлива, закрыты, неправильные данные в russiabase)
+BLACKLIST_POIIDS = {
+    "13154253",  # Газпромнефть №122 (Куконковых) — закрыта/нет топлива
+}
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
@@ -85,6 +89,8 @@ def _parse_date(value: str | None) -> datetime | None:
 def load_ivanovo(db: Session) -> tuple[int, int]:
     """Загружает станции и цены. Возвращает (станций, цен)."""
     records, coords = fetch_ivanovo()
+    # исключить чёрный список (закрытые/неправильные АЗС)
+    records = [r for r in records if str(r.get("poiid")) not in BLACKLIST_POIIDS]
     n_stations = n_prices = 0
     seen_poiids = {str(r["poiid"]) for r in records}
 
