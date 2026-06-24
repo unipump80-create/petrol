@@ -2,6 +2,17 @@
 
 Сервер для розничных пользователей (водителей): поиск дешёвого топлива и информация о наличии на АЗС города.
 
+## Быстрый старт
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/unipump80-create/petrol)
+
+Или развернуть локально:
+```bash
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Затем в PWABuilder: https://www.pwabuilder.com → URL → Build Android → Download APK
+
 ## Стек
 
 - Python 3.12
