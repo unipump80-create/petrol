@@ -119,7 +119,12 @@ def load_ivanovo(db: Session) -> tuple[int, int]:
         if station.id:
             db.query(Price).filter(Price.station_id == station.id).delete()
 
+        # дедуп: gas и propan оба маппятся в "gas" — на станцию одна цена газа
+        # (иначе UniqueConstraint(station, fuel_type) даёт IntegrityError)
+        seen_codes: set[str] = set()
         for field, code in RUSSIABASE_MAP.items():
+            if code in seen_codes:
+                continue
             raw = rec.get(field)
             if raw in (None, "", "0"):
                 continue
@@ -131,10 +136,11 @@ def load_ivanovo(db: Session) -> tuple[int, int]:
                 continue
             db.add(Price(station=station, fuel_type=code, price=price,
                          observed_at=observed, source="russiabase"))
+            seen_codes.add(code)
             available.append(code)
             n_prices += 1
 
-        station.fuel_types = sorted(set(available))
+        station.fuel_types = sorted(seen_codes)
         n_stations += 1
 
     db.commit()
