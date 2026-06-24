@@ -6,7 +6,3 @@ selectolax==0.3.17
 apscheduler==3.10.4
 pydantic-settings==2.1.0
 python-dotenv==1.0.0
-
-
-# Optional: для Card-Oil.ru парсинга
-# playwright==1.40.0
