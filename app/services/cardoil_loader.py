@@ -258,3 +258,75 @@ async def fetch_cardoil_all_brands(city: str = 'ivanovo') -> dict:
             logger.warning(f"cardoil: {brand} — ошибка: {e}")
 
     return all_stations
+
+
+def load_cardoil_all_brands(db: Session, city: str = 'ivanovo') -> tuple[int, int]:
+    """Загружает АЗС всех брендов с card-oil.ru и сохраняет в БД.
+    
+    Требует Playwright для полного функционала.
+    Без Playwright - логирует warning и возвращает 0.
+    """
+    import asyncio
+    
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        logger.warning("cardoil: Playwright не установлен")
+        logger.info("cardoil: для полной загрузки установи: pip install playwright")
+        return 0, 0
+    
+    all_stations = 0
+    all_prices = 0
+    brands = [
+        'gazpromneft', 'lukoil', 'tatnefit', 'surgutneftegaz', 
+        'rosneft', 'itera', 'esso', 'shell', 'azneft'
+    ]
+    
+    with sync_playwright() as p:
+        for brand in brands:
+            try:
+                browser = p.chromium.launch(headless=True)
+                page = browser.new_page()
+                url = f"https://card-oil.ru/azs/{brand}/{city}/"
+                
+                page.goto(url, wait_until='networkidle', timeout=30000)
+                
+                # Получаем данные со страницы
+                data = page.evaluate("""
+                    () => {
+                        const stations = [];
+                        document.querySelectorAll('[data-lat]').forEach(el => {
+                            stations.push({
+                                name: el.querySelector('.name')?.textContent || '',
+                                address: el.querySelector('.address')?.textContent || '',
+                                lat: parseFloat(el.dataset.lat),
+                                lon: parseFloat(el.dataset.lon),
+                            });
+                        });
+                        return stations;
+                    }
+                """)
+                
+                # Сохраняем в БД
+                for station_data in data:
+                    if station_data['lat'] and station_data['lon']:
+                        station = Station(
+                            poiid=f"{brand}_{station_data['name']}",
+                            brand=brand.capitalize(),
+                            name=station_data['name'],
+                            address=station_data['address'],
+                            lat=station_data['lat'],
+                            lon=station_data['lon'],
+                            source='cardoil'
+                        )
+                        db.add(station)
+                        all_stations += 1
+                
+                db.commit()
+                logger.info(f"cardoil: {brand} — {len(data)} станций")
+                browser.close()
+                
+            except Exception as e:
+                logger.warning(f"cardoil: {brand} — {e}")
+    
+    return all_stations, 0
