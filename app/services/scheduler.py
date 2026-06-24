@@ -5,11 +5,9 @@ from app.database import SessionLocal
 from app.services.russiabase_loader import load_ivanovo
 from app.services.cardoil_loader import enrich_availability
 from app.services.cache import cache_clear
+from app.config import settings
 
 logger = logging.getLogger(__name__)
-
-# Цены меняются редко — обновляем раз в 6 часов.
-REFRESH_HOURS = 6
 
 scheduler = BackgroundScheduler(timezone="Europe/Moscow")
 
@@ -34,12 +32,12 @@ def refresh_job():
 
 
 def start_scheduler(run_now: bool = True):
-    scheduler.add_job(refresh_job, "interval", hours=REFRESH_HOURS,
+    scheduler.add_job(refresh_job, "interval", minutes=settings.refresh_minutes,
                       id="refresh", replace_existing=True)
     scheduler.start()
     if run_now:
         scheduler.add_job(refresh_job, id="refresh_now")
-    logger.info("scheduler запущен (каждые %d ч)", REFRESH_HOURS)
+    logger.info("scheduler запущен (каждые %d мин)", settings.refresh_minutes)
 
 
 def stop_scheduler():
