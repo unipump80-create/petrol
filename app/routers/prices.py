@@ -102,3 +102,34 @@ def get_stats(db: Session = Depends(get_db)):
         'brands': get_brand_stats(db),
         'fuel_availability': get_fuel_availability(db),
     }
+
+
+@router.get("/history/{station_id}/{fuel_type}")
+def price_history(station_id: int, fuel_type: str, days: int = 30, db: Session = Depends(get_db)):
+    """История цен на топливо за период."""
+    from datetime import datetime, timedelta
+    from app.models_history import PriceHistory
+    
+    since = datetime.utcnow() - timedelta(days=days)
+    
+    history = db.query(PriceHistory).filter(
+        PriceHistory.station_id == station_id,
+        PriceHistory.fuel_type == fuel_type,
+        PriceHistory.recorded_at >= since
+    ).order_by(PriceHistory.recorded_at).all()
+    
+    return {
+        "station_id": station_id,
+        "fuel_type": fuel_type,
+        "days": days,
+        "points": [
+            {"time": h.recorded_at.isoformat(), "price": h.price}
+            for h in history
+        ],
+        "stats": {
+            "current": history[-1].price if history else None,
+            "min": min((h.price for h in history), default=None),
+            "max": max((h.price for h in history), default=None),
+            "avg": sum(h.price for h in history) / len(history) if history else None,
+        } if history else None
+    }
