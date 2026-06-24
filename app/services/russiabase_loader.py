@@ -25,10 +25,6 @@ BASE_URL = "https://russiabase.ru/prices"
 # половину АЗС Иваново, которые russiabase держит на страницах области).
 REGION_IVANOVO = "38"
 CITY_NAME = "иваново"
-# Закрытые АЗС (нет топлива, закрыты, неправильные данные в russiabase)
-BLACKLIST_POIIDS = {
-    "13154253",  # Газпромнефть №122 (Куконковых) — закрыта/нет топлива
-}
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
@@ -89,8 +85,6 @@ def _parse_date(value: str | None) -> datetime | None:
 def load_ivanovo(db: Session) -> tuple[int, int]:
     """Загружает станции и цены. Возвращает (станций, цен)."""
     records, coords = fetch_ivanovo()
-    # исключить чёрный список (закрытые/неправильные АЗС)
-    records = [r for r in records if str(r.get("poiid")) not in BLACKLIST_POIIDS]
     n_stations = n_prices = 0
     seen_poiids = {str(r["poiid"]) for r in records}
 
@@ -103,30 +97,13 @@ def load_ivanovo(db: Session) -> tuple[int, int]:
         poiid = str(rec["poiid"])
         brand = normalize_brand(rec.get("name", "").split("№")[0])
         geo = coords.get(poiid, {})
-
-        station = db.query(Station).filter(Station.poiid == poiid).first()
-        if station is None:
-            station = Station(poiid=poiid)
-            db.add(station)
-
-        station.brand = brand
-        station.name = rec.get("name")
-        station.address = rec.get("address")
-        station.source = "russiabase"
-        if geo.get("Y"):
-            station.lat = float(geo["Y"])
-        if geo.get("X"):
-            station.lon = float(geo["X"])
-
         observed = _parse_date(rec.get("prices_updated") or rec.get("LastUpdate"))
+
+        # сначала собрать цены, потом решать добавлять ли станцию
         available: list[str] = []
+        prices_to_add: list[dict] = []
 
-        # снести старые цены этой станции, записать актуальные
-        if station.id:
-            db.query(Price).filter(Price.station_id == station.id).delete()
-
-        # дедуп: gas и propan оба маппятся в "gas" — на станцию одна цена газа
-        # (иначе UniqueConstraint(station, fuel_type) даёт IntegrityError)
+        # дедуп: gas и propan оба маппятся в "gas" — одна цена газа
         seen_codes: set[str] = set()
         for field, code in RUSSIABASE_MAP.items():
             if code in seen_codes:
@@ -140,13 +117,39 @@ def load_ivanovo(db: Session) -> tuple[int, int]:
                 continue
             if price <= 0:
                 continue
-            db.add(Price(station=station, fuel_type=code, price=price,
-                         observed_at=observed, source="russiabase"))
+            prices_to_add.append({"fuel_type": code, "price": price, "observed_at": observed})
             seen_codes.add(code)
             available.append(code)
             n_prices += 1
 
+        # не сохранять станцию если у неё нет ни одной цены (закрыта/ошибка в источнике)
+        if not available:
+            logger.debug("пропускаю %s (нет цен)", poiid)
+            continue
+
+        # теперь добавляем станцию и её цены
+        station = db.query(Station).filter(Station.poiid == poiid).first()
+        if station is None:
+            station = Station(poiid=poiid)
+            db.add(station)
+        else:
+            # снести старые цены этой станции
+            db.query(Price).filter(Price.station_id == station.id).delete()
+
+        station.brand = brand
+        station.name = rec.get("name")
+        station.address = rec.get("address")
+        station.source = "russiabase"
+        if geo.get("Y"):
+            station.lat = float(geo["Y"])
+        if geo.get("X"):
+            station.lon = float(geo["X"])
         station.fuel_types = sorted(seen_codes)
+
+        # добавить собранные цены
+        for p in prices_to_add:
+            db.add(Price(station=station, **p, source="russiabase"))
+
         n_stations += 1
 
     db.commit()

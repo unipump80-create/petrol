@@ -61,15 +61,15 @@ def test_load_removes_stale_stations(db_session, monkeypatch):
     assert poiids == {"1"}  # старая удалена
 
 
-def test_load_skips_blacklist(db_session, monkeypatch):
-    """АЗС в чёрном списке (закрытые) не загружаются."""
+def test_load_skips_empty_stations(db_session, monkeypatch):
+    """АЗС без цен (закрытые/ошибка) не загружаются."""
     records = [
-        {"poiid": 1, "name": "OK", "address": "г. Иваново", "ai92": "50.0", "prices_updated": "01.06.2026"},
-        {"poiid": "13154253", "name": "Закрытая", "address": "г. Иваново", "ai92": "60.0", "prices_updated": "01.06.2026"},
+        {"poiid": "1", "name": "OK", "address": "г. Иваново", "ai92": "50.0", "prices_updated": "01.06.2026"},
+        {"poiid": "2", "name": "Закрытая", "address": "г. Иваново", "prices_updated": "01.06.2026"},  # нет цен
     ]
     monkeypatch.setattr(loader, "fetch_ivanovo", lambda: (records, {}))
 
     loader.load_ivanovo(db_session)
     poiids = {s.poiid for s in db_session.query(Station).all()}
-    assert "13154253" not in poiids  # закрытая не загрузилась
-    assert "1" in poiids  # нормальная загрузилась
+    assert "2" not in poiids  # без цен не загрузилась
+    assert "1" in poiids  # с ценой загрузилась
