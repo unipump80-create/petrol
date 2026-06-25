@@ -35,6 +35,7 @@ class StationListItem(BaseModel):
     address: str | None
     lat: float | None
     lon: float | None
+    opening_hours: str | None = None  # часы работы из OSM (часто "24/7")
     fuel_types: list[str] | None
     price: float | None  # цена по запрошенному виду топлива (если задан fuel)
     available: bool  # продаётся ли выбранный вид топлива на этой АЗС

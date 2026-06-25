@@ -398,11 +398,13 @@ function render() {
       : (s.report_status === 'ok' ? `<br><span style="color:#2ecc71">✅ есть (по отзывам)</span>` : '');
     const bzLine = s.benzuber_confirms
       ? `<br><span style="color:#2ecc71">✓ подтверждает 2-й источник (Benzuber)</span>` : '';
+    const hoursLine = s.opening_hours
+      ? `<br><span style="color:#888">🕒 ${s.opening_hours === '24/7' ? 'круглосуточно' : s.opening_hours}</span>` : '';
     const repBtns =
       `<div style="margin-top:6px;font-size:11px;color:#888">${fname} сейчас?</div>` +
       `<button onclick="reportFuel(${s.id},true)" class="rep ok">✅ есть</button>` +
       `<button onclick="reportFuel(${s.id},false)" class="rep no">⛔ нет</button>`;
-    m.bindPopup(`<b>${s.name||'АЗС'}</b><br>${s.brand||''}<br>${s.address||''}<br>${info}${repLine}${bzLine}${repBtns}`);
+    m.bindPopup(`<b>${s.name||'АЗС'}</b><br>${s.brand||''}<br>${s.address||''}<br>${info}${hoursLine}${repLine}${bzLine}${repBtns}`);
     m.on('click', () => selectRow(s.id));
     m.on('mouseover', () => hoverStation(s));
     m.on('mouseout', unhoverStation);

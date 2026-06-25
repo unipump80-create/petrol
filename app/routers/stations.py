@@ -145,7 +145,8 @@ def list_stations(
         bz_confirms = bool(fuel) and fuel in (st.benzuber_fuels or [])
         items.append(StationListItem(
             id=st.id, brand=st.brand, name=st.name, address=st.address,
-            lat=st.lat, lon=st.lon, fuel_types=st.fuel_types, price=price,
+            lat=st.lat, lon=st.lon, opening_hours=st.opening_hours,
+            fuel_types=st.fuel_types, price=price,
             available=available, observed_at=observed, days_old=days_old,
             freshness=fresh,
             report_status=rep["status"] if rep else None,

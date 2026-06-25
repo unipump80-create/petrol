@@ -5,6 +5,7 @@ from app.database import SessionLocal
 from app.services.russiabase_loader import load_ivanovo
 from app.services.cardoil_loader import enrich_availability
 from app.services.benzuber_loader import load_benzuber
+from app.services.osm_loader import enrich_opening_hours
 from app.services.cache import cache_clear
 from app.config import settings
 
@@ -13,13 +14,19 @@ logger = logging.getLogger(__name__)
 scheduler = BackgroundScheduler(timezone="Europe/Moscow")
 
 
-def benzuber_job():
-    """Кросс-чек наличия через Benzuber (реже основного — ~38 запросов)."""
+def enrich_job():
+    """Часовые обогащения (необязательные, тяжёлые): кросс-чек Benzuber +
+    часы работы OSM. Каждое в своём try — падение одного не валит другое."""
     db = SessionLocal()
     try:
-        load_benzuber(db)
-    except Exception:
-        logger.exception("benzuber: кросс-чек не удался (необязательный источник)")
+        try:
+            load_benzuber(db)
+        except Exception:
+            logger.exception("benzuber: кросс-чек не удался")
+        try:
+            enrich_opening_hours(db)
+        except Exception:
+            logger.exception("osm: часы работы не удались")
     finally:
         db.close()
 
@@ -46,14 +53,14 @@ def refresh_job():
 def start_scheduler(run_now: bool = True):
     scheduler.add_job(refresh_job, "interval", minutes=settings.refresh_minutes,
                       id="refresh", replace_existing=True)
-    scheduler.add_job(benzuber_job, "interval", minutes=settings.benzuber_minutes,
-                      id="benzuber", replace_existing=True)
+    scheduler.add_job(enrich_job, "interval", minutes=settings.benzuber_minutes,
+                      id="enrich", replace_existing=True)
     scheduler.start()
     if run_now:
         scheduler.add_job(refresh_job, id="refresh_now")
-    # benzuber всегда прогоняем разово при старте (в фоне, не блокирует)
-    scheduler.add_job(benzuber_job, id="benzuber_now")
-    logger.info("scheduler запущен (refresh %d мин, benzuber %d мин)",
+    # обогащения всегда прогоняем разово при старте (в фоне, не блокирует)
+    scheduler.add_job(enrich_job, id="enrich_now")
+    logger.info("scheduler запущен (refresh %d мин, обогащения %d мин)",
                 settings.refresh_minutes, settings.benzuber_minutes)
 
 
