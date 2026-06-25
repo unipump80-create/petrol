@@ -42,8 +42,9 @@ class StationListItem(BaseModel):
     observed_at: datetime | None  # когда цена обновлена в источнике
     days_old: int | None  # сколько дней назад
     freshness: str | None  # fresh | recent | stale
-    # краудсорс-наличие (свежие репорты пользователей по выбранному топливу)
-    report_status: str | None = None  # "out" — сообщают «нет»; "ok" — «есть»; None — нет репортов
+    # краудсорс-наличие (свежие репорты пользователей по выбранному топливу).
+    # report_status: in_stock | out_of_stock | unavailable | None
+    report_status: str | None = None
     report_at: datetime | None = None  # время последнего репорта
     report_count: int = 0  # сколько репортов за окно актуальности
     # независимое подтверждение наличия Benzuber (только положительное:
@@ -51,10 +52,14 @@ class StationListItem(BaseModel):
     benzuber_confirms: bool = False
 
 
+# Допустимые статусы краудсорс-репорта (модель ATAN/rk.gov)
+REPORT_STATUSES = {"in_stock", "out_of_stock", "unavailable"}
+
+
 class ReportIn(BaseModel):
-    """Тело запроса репорта о наличии."""
+    """Тело запроса репорта о наличии (3 статуса)."""
     fuel_type: str
-    available: bool
+    status: str  # in_stock | out_of_stock | unavailable
 
 
 class FuelSummary(BaseModel):

@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Column, Integer, String, Float, Boolean, DateTime, JSON, ForeignKey, Index,
+    Column, Integer, String, Float, DateTime, JSON, ForeignKey, Index,
     UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
@@ -65,13 +65,18 @@ class FuelReport(Base):
     Даёт то, чего нет ни в одном источнике-каталоге: реальный сигнал
     «кончилось прямо сейчас». Свежие репорты (за report_ttl_hours)
     переопределяют каталожное наличие в выдаче.
+
+    status (модель ATAN/rk.gov, индустриальный стандарт):
+      in_stock     — есть
+      out_of_stock — кончился (вид продаётся, но сейчас нет)
+      unavailable  — не продаётся здесь
     """
     __tablename__ = "fuel_reports"
 
     id = Column(Integer, primary_key=True, index=True)
     station_id = Column(Integer, ForeignKey("stations.id"), index=True)
     fuel_type = Column(String, index=True)
-    available = Column(Boolean)  # True — «есть», False — «нет»
+    status = Column(String)  # in_stock | out_of_stock | unavailable
     created_at = Column(DateTime, default=utcnow, index=True)
 
     __table_args__ = (

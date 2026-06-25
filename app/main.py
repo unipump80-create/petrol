@@ -33,8 +33,42 @@ def _resolve_version() -> str:
 APP_VERSION = _resolve_version()
 
 
+def _auto_migrate() -> None:
+    """Лёгкая авто-миграция SQLite без Alembic — защита от 500 при дрейфе
+    схемы на персистентной БД (create_all не добавляет колонки/не меняет тип):
+
+    1. fuel_reports со старой колонкой 'available' (вместо 'status') —
+       пересоздаём (репорты эфемерны, TTL часы, потеря безопасна).
+    2. stations: ADD COLUMN для любых колонок модели, которых нет в таблице
+       (напр. benzuber_fuels, добавленный позже).
+    """
+    from sqlalchemy import inspect, text
+    from app.models import Station
+
+    insp = inspect(engine)
+    tables = insp.get_table_names()
+
+    if "fuel_reports" in tables:
+        cols = {c["name"] for c in insp.get_columns("fuel_reports")}
+        if "status" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("DROP TABLE fuel_reports"))
+            insp = inspect(engine)
+            tables = insp.get_table_names()
+
+    if "stations" in tables:
+        existing = {c["name"] for c in insp.get_columns("stations")}
+        for col in Station.__table__.columns:
+            if col.name not in existing:
+                sqltype = col.type.compile(engine.dialect)
+                with engine.begin() as conn:
+                    conn.execute(text(
+                        f'ALTER TABLE stations ADD COLUMN "{col.name}" {sqltype}'))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _auto_migrate()
     Base.metadata.create_all(bind=engine)
     _ensure_data()
     start_scheduler(run_now=False)

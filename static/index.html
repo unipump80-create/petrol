@@ -82,6 +82,7 @@
     font-size: 13px; font-weight: 700; cursor: pointer; color: #fff; }
   button.rep.ok { background: #2ecc71; }
   button.rep.no { background: #e74c3c; }
+  button.rep.na { background: #6b7280; }
   .pin { border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 4px rgba(0,0,0,.6);
     width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
     font-size: 10px; font-weight: 700; color: #fff; }
@@ -284,13 +285,13 @@ function unhoverStation() {
   if (citySummaryHTML) document.getElementById('summary').innerHTML = citySummaryHTML;
 }
 
-// Краудсорс-репорт наличия выбранного топлива на АЗС (из попапа карты).
-async function reportFuel(stationId, available) {
+// Краудсорс-репорт наличия выбранного топлива (есть/кончился/не продаётся).
+async function reportFuel(stationId, status) {
   try {
     await fetch(`${API}/stations/${stationId}/report`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fuel_type: curFuel, available }),
+      body: JSON.stringify({ fuel_type: curFuel, status }),
     });
     map.closePopup();
     await loadStations();   // перерисовать с обновлённым статусом
@@ -359,10 +360,13 @@ function render() {
     const avail = s.available !== false;
     const c = avail ? colorFor(s.price, min, max) : GRAY;
     let badge;
-    if (s.report_status === 'out')
-      badge = `<span class="badge stale">⛔ сообщают: нет ${fname}${s.report_count>1?' · '+s.report_count:''}</span>`;
-    else if (s.report_status === 'ok')
-      badge = `<span class="badge fresh">✅ есть (по отзывам)</span>`;
+    const repN = s.report_count > 1 ? ' · ' + s.report_count : '';
+    if (s.report_status === 'out_of_stock')
+      badge = `<span class="badge stale">⛔ кончился ${fname}${repN}</span>`;
+    else if (s.report_status === 'unavailable')
+      badge = `<span class="badge none">✕ не продаётся ${fname}${repN}</span>`;
+    else if (s.report_status === 'in_stock')
+      badge = `<span class="badge fresh">✅ есть (по отзывам)${repN}</span>`;
     else if (avail)
       badge = `<span class="badge ${freshInfo(daysAgo(s.observed_at)).cls}">обновлено ${freshInfo(daysAgo(s.observed_at)).txt}</span>`;
     else
@@ -393,17 +397,22 @@ function render() {
       ? `<b>${s.price != null ? s.price.toFixed(2)+' ₽' : '—'}</b><br>
          <span style="color:#888">обновлено ${freshInfo(daysAgo(s.observed_at)).txt}</span>`
       : `<span style="color:#888">нет ${fname}</span>`;
-    const repLine = s.report_status === 'out'
-      ? `<br><span style="color:#e74c3c">⛔ сообщают: нет ${fname}${s.report_count>1?' ('+s.report_count+')':''}</span>`
-      : (s.report_status === 'ok' ? `<br><span style="color:#2ecc71">✅ есть (по отзывам)</span>` : '');
+    const repCnt = s.report_count > 1 ? ' (' + s.report_count + ')' : '';
+    const repLine = s.report_status === 'out_of_stock'
+      ? `<br><span style="color:#e74c3c">⛔ кончился ${fname}${repCnt}</span>`
+      : (s.report_status === 'unavailable'
+         ? `<br><span style="color:#8b92a0">✕ не продаётся ${fname}${repCnt}</span>`
+         : (s.report_status === 'in_stock'
+            ? `<br><span style="color:#2ecc71">✅ есть (по отзывам)${repCnt}</span>` : ''));
     const bzLine = s.benzuber_confirms
       ? `<br><span style="color:#2ecc71">✓ подтверждает 2-й источник (Benzuber)</span>` : '';
     const hoursLine = s.opening_hours
       ? `<br><span style="color:#888">🕒 ${s.opening_hours === '24/7' ? 'круглосуточно' : s.opening_hours}</span>` : '';
     const repBtns =
       `<div style="margin-top:6px;font-size:11px;color:#888">${fname} сейчас?</div>` +
-      `<button onclick="reportFuel(${s.id},true)" class="rep ok">✅ есть</button>` +
-      `<button onclick="reportFuel(${s.id},false)" class="rep no">⛔ нет</button>`;
+      `<button onclick="reportFuel(${s.id},'in_stock')" class="rep ok">✅ есть</button>` +
+      `<button onclick="reportFuel(${s.id},'out_of_stock')" class="rep no">⛔ кончился</button>` +
+      `<button onclick="reportFuel(${s.id},'unavailable')" class="rep na">✕ не продаётся</button>`;
     m.bindPopup(`<b>${s.name||'АЗС'}</b><br>${s.brand||''}<br>${s.address||''}<br>${info}${hoursLine}${repLine}${bzLine}${repBtns}`);
     m.on('click', () => selectRow(s.id));
     m.on('mouseover', () => hoverStation(s));
