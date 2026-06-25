@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Column, Integer, String, Float, DateTime, JSON, ForeignKey, Index,
+    Column, Integer, String, Float, Boolean, DateTime, JSON, ForeignKey, Index,
     UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
@@ -54,4 +54,24 @@ class Price(Base):
         Index("ix_prices_station_fuel", "station_id", "fuel_type"),
         # одна цена на (станция, топливо) — защита от дублей при гонке refresh
         UniqueConstraint("station_id", "fuel_type", name="uq_price_station_fuel"),
+    )
+
+
+class FuelReport(Base):
+    """Краудсорс-репорт о наличии топлива от пользователей.
+
+    Даёт то, чего нет ни в одном источнике-каталоге: реальный сигнал
+    «кончилось прямо сейчас». Свежие репорты (за report_ttl_hours)
+    переопределяют каталожное наличие в выдаче.
+    """
+    __tablename__ = "fuel_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    station_id = Column(Integer, ForeignKey("stations.id"), index=True)
+    fuel_type = Column(String, index=True)
+    available = Column(Boolean)  # True — «есть», False — «нет»
+    created_at = Column(DateTime, default=utcnow, index=True)
+
+    __table_args__ = (
+        Index("ix_reports_station_fuel_time", "station_id", "fuel_type", "created_at"),
     )

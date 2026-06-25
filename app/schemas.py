@@ -41,6 +41,16 @@ class StationListItem(BaseModel):
     observed_at: datetime | None  # когда цена обновлена в источнике
     days_old: int | None  # сколько дней назад
     freshness: str | None  # fresh | recent | stale
+    # краудсорс-наличие (свежие репорты пользователей по выбранному топливу)
+    report_status: str | None = None  # "out" — сообщают «нет»; "ok" — «есть»; None — нет репортов
+    report_at: datetime | None = None  # время последнего репорта
+    report_count: int = 0  # сколько репортов за окно актуальности
+
+
+class ReportIn(BaseModel):
+    """Тело запроса репорта о наличии."""
+    fuel_type: str
+    available: bool
 
 
 class FuelSummary(BaseModel):

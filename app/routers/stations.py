@@ -1,9 +1,9 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, selectinload
 from app.database import get_db
-from app.models import Station, Price
-from app.schemas import StationOut, StationListItem, PriceOut
+from app.models import Station, Price, FuelReport
+from app.schemas import StationOut, StationListItem, PriceOut, ReportIn
 from app.services.fuel_codes import FUEL_TYPES
 from app.services.russiabase_loader import load_ivanovo
 from app.services.cardoil_loader import enrich_availability
@@ -12,6 +12,50 @@ from app.config import settings
 from app.utils import utcnow
 
 router = APIRouter(prefix="/stations", tags=["stations"])
+
+
+def _recent_reports(db: Session, fuel: str) -> dict[int, dict]:
+    """Свежие краудсорс-репорты по виду топлива: {station_id: {status, at, count}}.
+
+    status = 'out' (последний репорт «нет») | 'ok' (последний «есть').
+    Учитываются только репорты за report_ttl_hours.
+    """
+    if not fuel:
+        return {}
+    since = utcnow() - timedelta(hours=settings.report_ttl_hours)
+    rows = (
+        db.query(FuelReport)
+        .filter(FuelReport.fuel_type == fuel, FuelReport.created_at >= since)
+        .order_by(FuelReport.created_at.asc())
+        .all()
+    )
+    by_station: dict[int, dict] = {}
+    for r in rows:
+        cur = by_station.setdefault(r.station_id, {"count": 0, "at": None, "available": None})
+        cur["count"] += 1
+        cur["at"] = r.created_at        # последний по времени (rows отсортированы asc)
+        cur["available"] = r.available
+    return {
+        sid: {"status": "ok" if d["available"] else "out",
+              "at": d["at"], "count": d["count"]}
+        for sid, d in by_station.items()
+    }
+
+
+@router.post("/{station_id}/report")
+def report_fuel(station_id: int, body: ReportIn, db: Session = Depends(get_db)):
+    """Краудсорс-репорт: есть/нет топлива на АЗС (от пользователя)."""
+    if body.fuel_type not in FUEL_TYPES:
+        raise HTTPException(status_code=400, detail="Неизвестный вид топлива")
+    st = db.query(Station).filter(Station.id == station_id).first()
+    if st is None:
+        raise HTTPException(status_code=404, detail="АЗС не найдена")
+    db.add(FuelReport(station_id=station_id, fuel_type=body.fuel_type,
+                      available=body.available))
+    db.commit()
+    rep = _recent_reports(db, body.fuel_type).get(station_id, {})
+    return {"ok": True, "station_id": station_id, "fuel_type": body.fuel_type,
+            "report": rep}
 
 # Троттлинг refresh: не парсить источник чаще, чем раз в N секунд (на весь сервер).
 # Защита от злоупотребления — иначе любой может дёргать парсер в цикле.
@@ -74,6 +118,8 @@ def list_stations(
         query = query.filter(Station.brand == brand)
     stations = query.all()
 
+    reports = _recent_reports(db, fuel)  # {station_id: {status, at, count}}
+
     items: list[StationListItem] = []
     for st in stations:
         price = None
@@ -91,11 +137,18 @@ def list_stations(
             dates = [p.observed_at for p in st.prices if p.observed_at]
             observed = max(dates) if dates else None
         days_old, fresh = freshness_of(observed)
+        rep = reports.get(st.id)
+        # свежий репорт «нет» переопределяет каталожное наличие
+        if rep and rep["status"] == "out":
+            available = False
         items.append(StationListItem(
             id=st.id, brand=st.brand, name=st.name, address=st.address,
             lat=st.lat, lon=st.lon, fuel_types=st.fuel_types, price=price,
             available=available, observed_at=observed, days_old=days_old,
             freshness=fresh,
+            report_status=rep["status"] if rep else None,
+            report_at=rep["at"] if rep else None,
+            report_count=rep["count"] if rep else 0,
         ))
 
     if fuel and sort == "price":

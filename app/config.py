@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     refresh_min_interval: int = 300
     # период планового перезабора цен+наличия (минуты). Меняется через env REFRESH_MINUTES.
     refresh_minutes: int = 15
+    # сколько часов краудсорс-репорт о наличии считается актуальным
+    report_ttl_hours: int = 6
 
     # Выбор источника данных: "russiabase" или "cardoil"
     # russiabase - более полный, cardoil - более свежие данные о наличии
