@@ -10,6 +10,15 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base, get_db
 from app.main import app
 from app.models import Station, Price
+from app.services import cache as _cache
+
+
+@pytest.fixture(autouse=True)
+def _clear_cache():
+    """Глобальный in-memory кэш не должен протекать между тестами."""
+    _cache.cache_clear()
+    yield
+    _cache.cache_clear()
 
 
 @pytest.fixture

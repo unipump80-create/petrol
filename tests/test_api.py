@@ -105,10 +105,13 @@ def test_refresh_throttled(client, monkeypatch):
     """Второй refresh подряд -> 429 (защита источника от долбёжки)."""
     monkeypatch.setattr(stations_router, "_last_refresh", None)
     monkeypatch.setattr(stations_router, "load_ivanovo", lambda db: (5, 10))
+    # card-oil обогащение замокано — без сети, детерминированно
+    monkeypatch.setattr(stations_router, "enrich_availability", lambda db: {})
 
     first = client.post("/stations/refresh")
     assert first.status_code == 200
-    assert first.json() == {"stations": 5, "prices": 10}
+    body = first.json()
+    assert body["stations"] == 5 and body["prices"] == 10
 
     second = client.post("/stations/refresh")
     assert second.status_code == 429
