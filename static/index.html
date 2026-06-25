@@ -367,6 +367,8 @@ function render() {
       badge = `<span class="badge ${freshInfo(daysAgo(s.observed_at)).cls}">обновлено ${freshInfo(daysAgo(s.observed_at)).txt}</span>`;
     else
       badge = `<span class="badge none">нет ${fname}</span>`;
+    const bzBadge = s.benzuber_confirms
+      ? `<span class="badge fresh" title="Подтверждено вторым источником (Benzuber)">✓ 2 источника</span>` : '';
     return `<div class="row ${avail ? '' : 'unavail'}" data-id="${s.id}">
       <div class="top">
         <span class="name"><span class="dot" style="background:${c}"></span>${s.name||'АЗС'}</span>
@@ -374,7 +376,7 @@ function render() {
       </div>
       <div class="brand">${s.brand||''}</div>
       <div class="addr">${s.address||''}</div>
-      ${badge}
+      ${badge} ${bzBadge}
     </div>`;
   }).join('');
 
@@ -394,11 +396,13 @@ function render() {
     const repLine = s.report_status === 'out'
       ? `<br><span style="color:#e74c3c">⛔ сообщают: нет ${fname}${s.report_count>1?' ('+s.report_count+')':''}</span>`
       : (s.report_status === 'ok' ? `<br><span style="color:#2ecc71">✅ есть (по отзывам)</span>` : '');
+    const bzLine = s.benzuber_confirms
+      ? `<br><span style="color:#2ecc71">✓ подтверждает 2-й источник (Benzuber)</span>` : '';
     const repBtns =
       `<div style="margin-top:6px;font-size:11px;color:#888">${fname} сейчас?</div>` +
       `<button onclick="reportFuel(${s.id},true)" class="rep ok">✅ есть</button>` +
       `<button onclick="reportFuel(${s.id},false)" class="rep no">⛔ нет</button>`;
-    m.bindPopup(`<b>${s.name||'АЗС'}</b><br>${s.brand||''}<br>${s.address||''}<br>${info}${repLine}${repBtns}`);
+    m.bindPopup(`<b>${s.name||'АЗС'}</b><br>${s.brand||''}<br>${s.address||''}<br>${info}${repLine}${bzLine}${repBtns}`);
     m.on('click', () => selectRow(s.id));
     m.on('mouseover', () => hoverStation(s));
     m.on('mouseout', unhoverStation);

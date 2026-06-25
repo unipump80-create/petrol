@@ -20,6 +20,8 @@ class Station(Base):
     lon = Column(Float)
     opening_hours = Column(String, nullable=True)  # из OSM
     fuel_types = Column(JSON)  # коды доступного топлива ["ai92","ai95","diesel"]
+    # кросс-чек Benzuber: виды топлива по версии Benzuber (None — станции там нет)
+    benzuber_fuels = Column(JSON, nullable=True)
     source = Column(String, default="russiabase")
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 

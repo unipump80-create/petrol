@@ -4,12 +4,24 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.database import SessionLocal
 from app.services.russiabase_loader import load_ivanovo
 from app.services.cardoil_loader import enrich_availability
+from app.services.benzuber_loader import load_benzuber
 from app.services.cache import cache_clear
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 scheduler = BackgroundScheduler(timezone="Europe/Moscow")
+
+
+def benzuber_job():
+    """Кросс-чек наличия через Benzuber (реже основного — ~38 запросов)."""
+    db = SessionLocal()
+    try:
+        load_benzuber(db)
+    except Exception:
+        logger.exception("benzuber: кросс-чек не удался (необязательный источник)")
+    finally:
+        db.close()
 
 
 def refresh_job():
@@ -34,10 +46,15 @@ def refresh_job():
 def start_scheduler(run_now: bool = True):
     scheduler.add_job(refresh_job, "interval", minutes=settings.refresh_minutes,
                       id="refresh", replace_existing=True)
+    scheduler.add_job(benzuber_job, "interval", minutes=settings.benzuber_minutes,
+                      id="benzuber", replace_existing=True)
     scheduler.start()
     if run_now:
         scheduler.add_job(refresh_job, id="refresh_now")
-    logger.info("scheduler запущен (каждые %d мин)", settings.refresh_minutes)
+    # benzuber всегда прогоняем разово при старте (в фоне, не блокирует)
+    scheduler.add_job(benzuber_job, id="benzuber_now")
+    logger.info("scheduler запущен (refresh %d мин, benzuber %d мин)",
+                settings.refresh_minutes, settings.benzuber_minutes)
 
 
 def stop_scheduler():

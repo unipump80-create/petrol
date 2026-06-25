@@ -141,6 +141,8 @@ def list_stations(
         # свежий репорт «нет» переопределяет каталожное наличие
         if rep and rep["status"] == "out":
             available = False
+        # Benzuber подтверждает выбранный вид (только положительно)
+        bz_confirms = bool(fuel) and fuel in (st.benzuber_fuels or [])
         items.append(StationListItem(
             id=st.id, brand=st.brand, name=st.name, address=st.address,
             lat=st.lat, lon=st.lon, fuel_types=st.fuel_types, price=price,
@@ -149,6 +151,7 @@ def list_stations(
             report_status=rep["status"] if rep else None,
             report_at=rep["at"] if rep else None,
             report_count=rep["count"] if rep else 0,
+            benzuber_confirms=bz_confirms,
         ))
 
     if fuel and sort == "price":

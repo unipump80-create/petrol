@@ -45,6 +45,9 @@ class StationListItem(BaseModel):
     report_status: str | None = None  # "out" — сообщают «нет»; "ok" — «есть»; None — нет репортов
     report_at: datetime | None = None  # время последнего репорта
     report_count: int = 0  # сколько репортов за окно актуальности
+    # независимое подтверждение наличия Benzuber (только положительное:
+    # молчание Benzuber ≠ отсутствие, он часто недорепортит)
+    benzuber_confirms: bool = False
 
 
 class ReportIn(BaseModel):
