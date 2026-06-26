@@ -87,8 +87,9 @@ def refresh(db: Session = Depends(get_db)):
     try:
         from app.services.gdebenz_loader import load_gdebenz
         gdebenz = load_gdebenz(db)  # наличие из ГдеБЕНЗ (Render может спать → обновляем по кнопке)
-    except Exception:
-        logger.exception("gdebenz: наличие не обновлено")  # не критично
+    except Exception as e:
+        logger.exception("gdebenz: наличие не обновлено")
+        gdebenz = {"error": f"{type(e).__name__}: {e}"}  # временная диагностика
     cache_clear()  # сбросить кэш сводки — иначе /prices/summary отдаёт старое
     return {"stations": ns, "prices": npr, "cardoil": enrich, "gdebenz": gdebenz}
 
