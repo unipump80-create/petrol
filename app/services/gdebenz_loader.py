@@ -68,13 +68,13 @@ def _fetch_curl_cffi(lat: float, lon: float) -> dict | None:
         from curl_cffi import requests as cffi
     except Exception:
         return None
-    # WAF gdebenz.ru нестабильно пропускает с дата-центров — пробуем разные
-    # профили браузера (разные JA3), это заметно повышает шанс пройти.
+    # WAF gdebenz.ru нестабильно пропускает с дата-центров — пробуем несколько
+    # профилей браузера (разные JA3). Таймаут короткий, чтобы /refresh не висел.
     last = None
-    for imp in ("chrome", "chrome124", "chrome120", "safari", "edge99"):
+    for imp in ("chrome", "safari", "edge99"):
         try:
             r = cffi.get(NEARBY_URL, params={"lat": lat, "lon": lon},
-                         impersonate=imp, timeout=30)
+                         impersonate=imp, timeout=10)
             r.raise_for_status()
             return r.json()
         except Exception as e:
@@ -84,9 +84,9 @@ def _fetch_curl_cffi(lat: float, lon: float) -> dict | None:
     return None
 
 
-def _fetch_nearby(lat: float, lon: float, attempts: int = 5) -> dict:
-    """GET api/nearby с ретраями. Сначала curl_cffi (браузерный TLS, набор
-    профилей), затем httpx как фоллбэк. Бросает последнюю ошибку."""
+def _fetch_nearby(lat: float, lon: float, attempts: int = 2) -> dict:
+    """GET api/nearby. curl_cffi (профили браузера), фоллбэк httpx.
+    Время ограничено, чтобы /refresh не зависал при блокировке WAF."""
     last: Exception = RuntimeError("no attempts")
     for i in range(attempts):
         try:
@@ -96,13 +96,13 @@ def _fetch_nearby(lat: float, lon: float, attempts: int = 5) -> dict:
         except Exception as e:
             last = e
         try:  # фоллбэк httpx
-            with httpx.Client(timeout=30, trust_env=False, headers=HEADERS,
+            with httpx.Client(timeout=10, trust_env=False, headers=HEADERS,
                               verify=_ssl_context(), http2=False) as c:
                 return c.get(NEARBY_URL, params={"lat": lat, "lon": lon}).json()
         except Exception as e:
             last = e
         if i < attempts - 1:
-            time.sleep(2 * (i + 1))
+            time.sleep(2)
     raise last
 
 
