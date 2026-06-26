@@ -68,15 +68,25 @@ def _fetch_curl_cffi(lat: float, lon: float) -> dict | None:
         from curl_cffi import requests as cffi
     except Exception:
         return None
-    r = cffi.get(NEARBY_URL, params={"lat": lat, "lon": lon},
-                 impersonate="chrome", timeout=30)
-    r.raise_for_status()
-    return r.json()
+    # WAF gdebenz.ru нестабильно пропускает с дата-центров — пробуем разные
+    # профили браузера (разные JA3), это заметно повышает шанс пройти.
+    last = None
+    for imp in ("chrome", "chrome124", "chrome120", "safari", "edge99"):
+        try:
+            r = cffi.get(NEARBY_URL, params={"lat": lat, "lon": lon},
+                         impersonate=imp, timeout=30)
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            last = e
+    if last:
+        raise last
+    return None
 
 
-def _fetch_nearby(lat: float, lon: float, attempts: int = 3) -> dict:
-    """GET api/nearby с ретраями. Сначала curl_cffi (браузерный TLS),
-    затем httpx как фоллбэк. Бросает последнюю ошибку."""
+def _fetch_nearby(lat: float, lon: float, attempts: int = 5) -> dict:
+    """GET api/nearby с ретраями. Сначала curl_cffi (браузерный TLS, набор
+    профилей), затем httpx как фоллбэк. Бросает последнюю ошибку."""
     last: Exception = RuntimeError("no attempts")
     for i in range(attempts):
         try:
@@ -92,7 +102,7 @@ def _fetch_nearby(lat: float, lon: float, attempts: int = 3) -> dict:
         except Exception as e:
             last = e
         if i < attempts - 1:
-            time.sleep(1.5 * (i + 1))
+            time.sleep(2 * (i + 1))
     raise last
 
 
