@@ -13,6 +13,8 @@
 каждого вида топлива.
 """
 import logging
+import ssl
+import time
 
 import httpx
 from sqlalchemy.orm import Session
@@ -33,14 +35,43 @@ _NO_FUEL = {"no"}
 _CORE_FUELS = ["ai92", "ai95", "ai98", "diesel"]
 
 
+def _ssl_context() -> ssl.SSLContext:
+    """SSL-контекст с пониженным уровнем безопасности и широким набором шифров.
+
+    С дата-центров (Render) gdebenz.ru обрывает TLS-рукопожатие
+    (SSL: UNEXPECTED_EOF_WHILE_READING) при дефолтном наборе шифров.
+    SECLEVEL=1 + DEFAULT восстанавливает совместимость.
+    """
+    ctx = ssl.create_default_context()
+    try:
+        ctx.set_ciphers("DEFAULT@SECLEVEL=1")
+    except ssl.SSLError:
+        pass
+    return ctx
+
+
+def _fetch_nearby(lat: float, lon: float, attempts: int = 3) -> dict:
+    """GET api/nearby с ретраями и устойчивым SSL. Бросает последнюю ошибку."""
+    last: Exception = RuntimeError("no attempts")
+    for i in range(attempts):
+        try:
+            with httpx.Client(timeout=30, trust_env=False, headers=HEADERS,
+                              verify=_ssl_context(), http2=False) as c:
+                return c.get(NEARBY_URL, params={"lat": lat, "lon": lon}).json()
+        except Exception as e:  # ConnectError/SSL/timeout — пробуем ещё
+            last = e
+            if i < attempts - 1:
+                time.sleep(1.5 * (i + 1))
+    raise last
+
+
 def load_gdebenz(db: Session, center: tuple[float, float] = IVANOVO) -> dict:
     """Тянет наличие из ГдеБЕНЗ и обновляет FuelReport(source='gdebenz').
 
     Возвращает {"checked", "no_fuel", "reports"}.
     """
     lat, lon = center
-    with httpx.Client(timeout=30, trust_env=False, headers=HEADERS) as c:
-        data = c.get(NEARBY_URL, params={"lat": lat, "lon": lon}).json()
+    data = _fetch_nearby(lat, lon)
 
     stations = data.get("stations", []) or []
 
