@@ -77,6 +77,7 @@ class FuelReport(Base):
     station_id = Column(Integer, ForeignKey("stations.id"), index=True)
     fuel_type = Column(String, index=True)
     status = Column(String)  # in_stock | out_of_stock | unavailable
+    source = Column(String, default="user", index=True)  # user | gdebenz | …
     created_at = Column(DateTime, default=utcnow, index=True)
 
     __table_args__ = (

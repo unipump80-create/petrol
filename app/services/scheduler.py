@@ -6,6 +6,7 @@ from app.services.russiabase_loader import load_ivanovo
 from app.services.cardoil_loader import enrich_availability
 from app.services.benzuber_loader import load_benzuber
 from app.services.osm_loader import enrich_opening_hours
+from app.services.gdebenz_loader import load_gdebenz
 from app.services.cache import cache_clear
 from app.config import settings
 
@@ -27,6 +28,10 @@ def enrich_job():
             enrich_opening_hours(db)
         except Exception:
             logger.exception("osm: часы работы не удались")
+        try:
+            load_gdebenz(db)
+        except Exception:
+            logger.exception("gdebenz: наличие не удалось")
     finally:
         db.close()
 

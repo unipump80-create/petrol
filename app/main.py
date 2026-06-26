@@ -43,7 +43,7 @@ def _auto_migrate() -> None:
        (напр. benzuber_fuels, добавленный позже).
     """
     from sqlalchemy import inspect, text
-    from app.models import Station
+    from app.models import Station, FuelReport
 
     insp = inspect(engine)
     tables = insp.get_table_names()
@@ -55,6 +55,14 @@ def _auto_migrate() -> None:
                 conn.execute(text("DROP TABLE fuel_reports"))
             insp = inspect(engine)
             tables = insp.get_table_names()
+        else:
+            # ADD COLUMN для новых полей модели (напр. source)
+            for col in FuelReport.__table__.columns:
+                if col.name not in cols:
+                    sqltype = col.type.compile(engine.dialect)
+                    with engine.begin() as conn:
+                        conn.execute(text(
+                            f'ALTER TABLE fuel_reports ADD COLUMN "{col.name}" {sqltype}'))
 
     if "stations" in tables:
         existing = {c["name"] for c in insp.get_columns("stations")}
