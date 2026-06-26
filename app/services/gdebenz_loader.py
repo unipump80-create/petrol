@@ -50,18 +50,42 @@ def _ssl_context() -> ssl.SSLContext:
     return ctx
 
 
+def _fetch_curl_cffi(lat: float, lon: float) -> dict | None:
+    """Запрос с имитацией TLS-фингерпринта Chrome (обход WAF gdebenz.ru).
+
+    gdebenz.ru с дата-центров (Render) рвёт рукопожатие для не-браузерных
+    клиентов (SSL EOF). curl_cffi impersonate=chrome повторяет JA3 браузера.
+    Возвращает None, если библиотека недоступна.
+    """
+    try:
+        from curl_cffi import requests as cffi
+    except Exception:
+        return None
+    r = cffi.get(NEARBY_URL, params={"lat": lat, "lon": lon},
+                 impersonate="chrome", timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
 def _fetch_nearby(lat: float, lon: float, attempts: int = 3) -> dict:
-    """GET api/nearby с ретраями и устойчивым SSL. Бросает последнюю ошибку."""
+    """GET api/nearby с ретраями. Сначала curl_cffi (браузерный TLS),
+    затем httpx как фоллбэк. Бросает последнюю ошибку."""
     last: Exception = RuntimeError("no attempts")
     for i in range(attempts):
         try:
+            data = _fetch_curl_cffi(lat, lon)
+            if data is not None:
+                return data
+        except Exception as e:
+            last = e
+        try:  # фоллбэк httpx
             with httpx.Client(timeout=30, trust_env=False, headers=HEADERS,
                               verify=_ssl_context(), http2=False) as c:
                 return c.get(NEARBY_URL, params={"lat": lat, "lon": lon}).json()
-        except Exception as e:  # ConnectError/SSL/timeout — пробуем ещё
+        except Exception as e:
             last = e
-            if i < attempts - 1:
-                time.sleep(1.5 * (i + 1))
+        if i < attempts - 1:
+            time.sleep(1.5 * (i + 1))
     raise last
 
 
