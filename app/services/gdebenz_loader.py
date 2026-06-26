@@ -29,8 +29,15 @@ IVANOVO = (57.0, 40.97)  # центр для api/nearby
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 SOURCE = "gdebenz"
 
-# Статусы ГдеБЕНЗ, означающие отсутствие топлива
-_NO_FUEL = {"no"}
+# Маппинг статусов ГдеБЕНЗ → наш статус наличия
+#   no                  → out_of_stock (нет топлива)
+#   yes / low / queue   → in_stock     (топливо есть; low=мало, queue=очередь)
+_STATUS_MAP = {
+    "no": "out_of_stock",
+    "yes": "in_stock",
+    "low": "in_stock",
+    "queue": "in_stock",
+}
 # Если у станции не заданы виды топлива — помечаем базовый набор
 _CORE_FUELS = ["ai92", "ai95", "ai98", "diesel"]
 
@@ -115,12 +122,14 @@ def load_gdebenz(db: Session, center: tuple[float, float] = IVANOVO) -> dict:
     )
 
     no_fuel = 0
+    has_fuel = 0
     reports = 0
     used: set[int] = set()
     for item in stations:
         if not item.get("confirmed"):
             continue  # только подтверждённые отметки
-        if item.get("status") not in _NO_FUEL:
+        our_status = _STATUS_MAP.get(item.get("status"))
+        if our_status is None:
             continue
         lat, lon = item.get("lat"), item.get("lon")
         if lat is None or lon is None:
@@ -138,16 +147,20 @@ def load_gdebenz(db: Session, center: tuple[float, float] = IVANOVO) -> dict:
             continue
         used.add(best.id)
 
-        no_fuel += 1
+        if our_status == "out_of_stock":
+            no_fuel += 1
+        else:
+            has_fuel += 1
         fuels = best.fuel_types or _CORE_FUELS
         for f in fuels:
             db.add(FuelReport(
                 station_id=best.id, fuel_type=f,
-                status="out_of_stock", source=SOURCE,
+                status=our_status, source=SOURCE,
             ))
             reports += 1
 
     db.commit()
-    logger.info("gdebenz: %d станций без топлива, %d отчётов (из %d отметок)",
-                no_fuel, reports, len(stations))
-    return {"checked": len(stations), "no_fuel": no_fuel, "reports": reports}
+    logger.info("gdebenz: %d без топлива, %d с топливом, %d отчётов (из %d отметок)",
+                no_fuel, has_fuel, reports, len(stations))
+    return {"checked": len(stations), "no_fuel": no_fuel,
+            "has_fuel": has_fuel, "reports": reports}

@@ -331,9 +331,11 @@ function render() {
   markers = {};
   const list = document.getElementById('list');
 
-  // тумблер «где есть топливо»: вкл — только доступные
+  // тумблер «где есть топливо»: вкл — только с подтверждённым наличием
+  // (ГдеБЕНЗ in_stock или 2-й источник Benzuber), а не просто «не подтверждено
+  // отсутствие» — иначе показывались АЗС без данных как «есть».
   const visible = stations.filter(s =>
-    !onlyAvailable || s.available !== false);
+    !onlyAvailable || s.report_status === 'in_stock' || s.benzuber_confirms);
 
   // min/max только по доступным с ценой
   const prices = visible.filter(s => s.available && s.price != null).map(s => s.price);
