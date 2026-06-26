@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, selectinload
@@ -12,6 +13,7 @@ from app.config import settings
 from app.utils import utcnow
 
 router = APIRouter(prefix="/stations", tags=["stations"])
+logger = logging.getLogger(__name__)
 
 
 def _recent_reports(db: Session, fuel: str) -> dict[int, dict]:
@@ -85,8 +87,8 @@ def refresh(db: Session = Depends(get_db)):
     try:
         from app.services.gdebenz_loader import load_gdebenz
         gdebenz = load_gdebenz(db)  # наличие из ГдеБЕНЗ (Render может спать → обновляем по кнопке)
-    except Exception as e:
-        gdebenz = {"error": f"{type(e).__name__}: {e}"}  # диагностика на проде
+    except Exception:
+        logger.exception("gdebenz: наличие не обновлено")  # не критично
     cache_clear()  # сбросить кэш сводки — иначе /prices/summary отдаёт старое
     return {"stations": ns, "prices": npr, "cardoil": enrich, "gdebenz": gdebenz}
 
