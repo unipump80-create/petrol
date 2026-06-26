@@ -125,7 +125,7 @@
   <select id="fuel"></select>
   <button id="sortPrice" class="active">по цене</button>
   <button id="sortName">по названию</button>
-  <button id="showUnavail" class="active" style="margin-left:14px">⛔ где нет топлива</button>
+  <button id="showUnavail" style="margin-left:14px">✅ где есть топливо</button>
   <button id="gazpromBtn" style="margin-left:8px">🔵 Газпромнефть</button>
   <button id="refreshBtn" style="margin-left:8px">🔄 Обновить данные</button>
   <button id="appUpdateBtn" style="margin-left:8px" title="Проверить и установить новую версию приложения">⬆️ Обновить приложение</button>
@@ -149,7 +149,7 @@
 const API = (window.PETROL_API || '').replace(/\/$/, '');
 const IVANOVO = [57.0, 40.97];
 let map, markers = {}, stations = [], sortBy = 'price', curFuel = 'ai95';
-let showUnavail = true; // показывать ли АЗС без выбранного топлива (серым)
+let onlyAvailable = false; // вкл — показывать только АЗС, где есть выбранное топливо
 let showOnlyGazprom = false; // только Газпромнефть
 let swRegistration = null;    // регистрация Service Worker (для кнопки обновления)
 let citySummaryHTML = '';     // HTML сводки по городу — для восстановления после hover
@@ -331,9 +331,9 @@ function render() {
   markers = {};
   const list = document.getElementById('list');
 
-  // тумблер «нет топлива»
+  // тумблер «где есть топливо»: вкл — только доступные
   const visible = stations.filter(s =>
-    showUnavail || s.available !== false);
+    !onlyAvailable || s.available !== false);
 
   // min/max только по доступным с ценой
   const prices = visible.filter(s => s.available && s.price != null).map(s => s.price);
@@ -441,8 +441,8 @@ function setSortBtn() {
 }
 
 document.getElementById('showUnavail').onclick = function() {
-  showUnavail = !showUnavail;
-  this.classList.toggle('active', showUnavail);
+  onlyAvailable = !onlyAvailable;
+  this.classList.toggle('active', onlyAvailable);
   render();
 };
 
