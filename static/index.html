@@ -183,9 +183,9 @@ function colorFor(price, min, max) {
 }
 
 function initMap() {
-  map = L.map('map', { zoomControl: true }).setView(IVANOVO, 12);
+  map = L.map('map', { zoomControl: true, attributionControl: false }).setView(IVANOVO, 12);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap', maxZoom: 19
+    maxZoom: 19
   }).addTo(map);
 }
 
