@@ -81,8 +81,14 @@ def refresh(db: Session = Depends(get_db)):
         enrich = enrich_availability(db)
     except Exception:
         pass  # наличие останется из russiabase
+    gdebenz = {}
+    try:
+        from app.services.gdebenz_loader import load_gdebenz
+        gdebenz = load_gdebenz(db)  # наличие из ГдеБЕНЗ (Render может спать → обновляем по кнопке)
+    except Exception:
+        pass  # наличие из ГдеБЕНЗ не критично
     cache_clear()  # сбросить кэш сводки — иначе /prices/summary отдаёт старое
-    return {"stations": ns, "prices": npr, "cardoil": enrich}
+    return {"stations": ns, "prices": npr, "cardoil": enrich, "gdebenz": gdebenz}
 
 # Пороги свежести данных (дни)
 FRESH_DAYS = 1

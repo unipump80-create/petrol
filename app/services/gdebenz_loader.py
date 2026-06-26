@@ -44,6 +44,12 @@ def load_gdebenz(db: Session, center: tuple[float, float] = IVANOVO) -> dict:
 
     stations = data.get("stations", []) or []
 
+    # Защита от транзиентного пустого ответа: не стираем прошлые отчёты,
+    # если источник ничего не вернул (иначе наличие «пропадёт» на ровном месте).
+    if not stations:
+        logger.warning("gdebenz: пустой ответ — отчёты сохранены, обновление пропущено")
+        return {"checked": 0, "no_fuel": 0, "reports": 0}
+
     # Наши станции имеют координаты, но не osm_id — сопоставляем по близости
     # (как benzuber/cardoil), а не по osm_id.
     ours = [s for s in db.query(Station).all() if s.lat and s.lon]
