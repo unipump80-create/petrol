@@ -1,0 +1,29 @@
+name: Keep-warm & refresh
+
+# Внешний планировщик вместо in-process APScheduler: на Render free-tier
+# инстанс засыпает и встроенный планировщик не работает. Этот cron каждые
+# 10 минут дёргает /stations/refresh — обновляет данные (russiabase + ГдеБЕНЗ)
+# и держит инстанс «тёплым» (нет сна → нет сброса эфемерной БД на старте).
+#
+# Интервал 10 мин < 15 мин сна Render и > 5 мин троттлинга /refresh (300 с).
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}   # ручной запуск из вкладки Actions
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST /stations/refresh
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" -m 120 \
+            -X POST "https://petrol-1oz7.onrender.com/stations/refresh" || true)
+          echo "refresh HTTP $code"
+          # 200 — обновлено, 429 — троттлинг (ок). Иначе — повтор разбудит инстанс.
+          if [ "$code" != "200" ] && [ "$code" != "429" ]; then
+            sleep 20
+            curl -s -o /dev/null -w "retry HTTP %{http_code}\n" -m 120 \
+              -X POST "https://petrol-1oz7.onrender.com/stations/refresh" || true
+          fi

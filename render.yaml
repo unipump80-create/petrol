@@ -7,3 +7,18 @@ services:
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
+      # БД конфигурируется через DATABASE_URL (по умолчанию sqlite на эфемерном
+      # диске). Для ПОСТОЯННОГО хранения (переживает деплой/рестарт):
+      #   1) тариф Starter+ → раскомментировать disk ниже и указать путь:
+      #        DATABASE_URL=sqlite:////var/data/petrol.db
+      #   2) или Render PostgreSQL → DATABASE_URL=<connection string>
+      # - key: DATABASE_URL
+      #   value: sqlite:////var/data/petrol.db
+
+    # Постоянный диск (нужен платный тариф Render). На free-tier недоступен —
+    # вместо него .github/workflows/refresh.yml держит инстанс тёплым и
+    # обновляет данные, чтобы эфемерная БД не пустела.
+    # disk:
+    #   name: petrol-data
+    #   mountPath: /var/data
+    #   sizeGB: 1
