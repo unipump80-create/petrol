@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from app.database import Base, engine
 from app.config import settings
 from app.services.scheduler import start_scheduler, stop_scheduler
-from app.routers import stations, prices
+from app.routers import stations, prices, community
 
 import os
 
@@ -132,6 +132,7 @@ app.add_middleware(
 
 app.include_router(stations.router)
 app.include_router(prices.router)
+app.include_router(community.router)
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

@@ -47,6 +47,10 @@ class StationListItem(BaseModel):
     report_status: str | None = None
     report_at: datetime | None = None  # время последнего репорта
     report_count: int = 0  # сколько репортов за окно актуальности
+    # станционный 4-state статус наличия ГдеБЕНЗ: yes | queue | low | no | None
+    avail_state: str | None = None
+    avail_confirmations: int = 0
+    comment_count: int = 0  # сколько комментариев под АЗС
     # независимое подтверждение наличия Benzuber (только положительное:
     # молчание Benzuber ≠ отсутствие, он часто недорепортит)
     benzuber_confirms: bool = False

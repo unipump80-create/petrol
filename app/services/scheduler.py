@@ -6,7 +6,7 @@ from app.services.russiabase_loader import load_ivanovo
 from app.services.cardoil_loader import enrich_availability
 from app.services.benzuber_loader import load_benzuber
 from app.services.osm_loader import enrich_opening_hours
-from app.services.gdebenz_loader import load_gdebenz
+from app.services.gdebenz_loader import load_gdebenz, load_gdebenz_comments
 from app.services.cache import cache_clear
 from app.config import settings
 
@@ -32,6 +32,10 @@ def enrich_job():
             load_gdebenz(db)
         except Exception:
             logger.exception("gdebenz: наличие не удалось")
+        try:
+            load_gdebenz_comments(db)
+        except Exception:
+            logger.exception("gdebenz: комментарии не удались")
     finally:
         db.close()
 

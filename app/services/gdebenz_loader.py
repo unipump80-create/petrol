@@ -15,16 +15,18 @@
 import logging
 import ssl
 import time
+from datetime import datetime
 
 import httpx
 from sqlalchemy.orm import Session
 
-from app.models import Station, FuelReport
+from app.models import Station, FuelReport, StationAvail, Comment
 from app.services.cardoil_loader import _dist_m, MATCH_RADIUS_M
 
 logger = logging.getLogger(__name__)
 
 NEARBY_URL = "https://gdebenz.ru/api/nearby"
+COMMENTS_URL = "https://gdebenz.ru/api/comments"
 IVANOVO = (57.0, 40.97)  # центр для api/nearby
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 SOURCE = "gdebenz"
@@ -40,6 +42,18 @@ _STATUS_MAP = {
 }
 # Если у станции не заданы виды топлива — помечаем базовый набор
 _CORE_FUELS = ["ai92", "ai95", "ai98", "diesel"]
+
+
+def _parse_dt(val) -> datetime | None:
+    """Парсит '2026-06-26 06:06:00' / ISO → datetime, иначе None."""
+    if not val:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(str(val)[:19], fmt)
+        except ValueError:
+            continue
+    return None
 
 
 def _ssl_context() -> ssl.SSLContext:
@@ -130,6 +144,9 @@ def load_gdebenz(db: Session, center: tuple[float, float] = IVANOVO) -> dict:
     db.query(FuelReport).filter(FuelReport.source == SOURCE).delete(
         synchronize_session=False
     )
+    db.query(StationAvail).filter(StationAvail.source == SOURCE).delete(
+        synchronize_session=False
+    )
 
     no_fuel = 0
     has_fuel = 0
@@ -169,8 +186,92 @@ def load_gdebenz(db: Session, center: tuple[float, float] = IVANOVO) -> dict:
             ))
             reports += 1
 
+        # Станционный 4-state статус (native ГдеБЕНЗ) для пина на карте
+        db.add(StationAvail(
+            station_id=best.id,
+            state=item.get("status"),                  # yes | queue | low | no
+            confirmations=item.get("confirmations") or 0,
+            last_at=_parse_dt(item.get("last_at")),
+            source=SOURCE,
+        ))
+
     db.commit()
     logger.info("gdebenz: %d без топлива, %d с топливом, %d отчётов (из %d отметок)",
                 no_fuel, has_fuel, reports, len(stations))
     return {"checked": len(stations), "no_fuel": no_fuel,
             "has_fuel": has_fuel, "reports": reports}
+
+
+# Bbox Иваново для /api/comments (lat1,lon1 — ЮЗ; lat2,lon2 — СВ)
+IVANOVO_BBOX = (56.9, 40.8, 57.1, 41.2)
+
+
+def _fetch_comments(bbox: tuple[float, float, float, float]) -> list[dict]:
+    """GET /api/comments по bbox. curl_cffi → httpx, как и nearby."""
+    lat1, lon1, lat2, lon2 = bbox
+    params = {"lat1": lat1, "lon1": lon1, "lat2": lat2, "lon2": lon2}
+    try:
+        from curl_cffi import requests as cffi
+        for imp in ("chrome", "safari"):
+            try:
+                r = cffi.get(COMMENTS_URL, params=params, impersonate=imp, timeout=10)
+                r.raise_for_status()
+                return r.json() or []
+            except Exception:
+                continue
+    except Exception:
+        pass
+    with httpx.Client(timeout=10, trust_env=False, headers=HEADERS,
+                      verify=_ssl_context(), http2=False) as c:
+        return c.get(COMMENTS_URL, params=params).json() or []
+
+
+def load_gdebenz_comments(db: Session, bbox=IVANOVO_BBOX) -> dict:
+    """Тянет комментарии водителей из ГдеБЕНЗ и сохраняет (source='gdebenz').
+
+    Привязка к нашей станции — по близости (как наличие). Дедуп по ext_id.
+    Возвращает {"fetched", "saved"}.
+    """
+    raw = _fetch_comments(bbox)
+    # API может вернуть список или {"comments":[...]}
+    items = raw.get("comments", []) if isinstance(raw, dict) else raw
+    if not items:
+        return {"fetched": 0, "saved": 0}
+
+    ours = [s for s in db.query(Station).all() if s.lat and s.lon]
+    existing = {
+        c.ext_id for c in db.query(Comment).filter(
+            Comment.source == SOURCE, Comment.ext_id.isnot(None)).all()
+    }
+    saved = 0
+    for it in items:
+        ext = str(it.get("id")) if it.get("id") is not None else None
+        if ext and ext in existing:
+            continue
+        text = (it.get("text") or it.get("comment") or "").strip()
+        if not text:
+            continue
+        lat, lon = it.get("lat"), it.get("lon")
+        st_id = None
+        if lat is not None and lon is not None:
+            best, best_d = None, MATCH_RADIUS_M
+            for st in ours:
+                d = _dist_m(lat, lon, st.lat, st.lon)
+                if d < best_d:
+                    best, best_d = st, d
+            st_id = best.id if best else None
+        c = Comment(
+            station_id=st_id, text=text[:500],
+            author=(it.get("author") or it.get("name") or None),
+            state=it.get("status"), source=SOURCE, ext_id=ext,
+        )
+        dt = _parse_dt(it.get("created_at") or it.get("last_at"))
+        if dt is not None:
+            c.created_at = dt
+        db.add(c)
+        saved += 1
+        if ext:
+            existing.add(ext)
+    db.commit()
+    logger.info("gdebenz: комментарии %d получено, %d сохранено", len(items), saved)
+    return {"fetched": len(items), "saved": saved}

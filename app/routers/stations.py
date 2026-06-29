@@ -3,7 +3,8 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, selectinload
 from app.database import get_db
-from app.models import Station, Price, FuelReport
+from sqlalchemy import func
+from app.models import Station, Price, FuelReport, StationAvail, Comment
 from app.schemas import StationOut, StationListItem, PriceOut, ReportIn, REPORT_STATUSES
 from app.services.fuel_codes import FUEL_TYPES
 from app.services.russiabase_loader import load_ivanovo
@@ -85,8 +86,12 @@ def refresh(db: Session = Depends(get_db)):
         pass  # наличие останется из russiabase
     gdebenz = {}
     try:
-        from app.services.gdebenz_loader import load_gdebenz
+        from app.services.gdebenz_loader import load_gdebenz, load_gdebenz_comments
         gdebenz = load_gdebenz(db)  # наличие из ГдеБЕНЗ (Render может спать → обновляем по кнопке)
+        try:
+            gdebenz["comments"] = load_gdebenz_comments(db)
+        except Exception:
+            logger.exception("gdebenz: комментарии не обновлены")
     except Exception:
         logger.exception("gdebenz: наличие не обновлено")  # не критично, повтор по кнопке
     cache_clear()  # сбросить кэш сводки — иначе /prices/summary отдаёт старое
@@ -125,6 +130,14 @@ def list_stations(
     stations = query.all()
 
     reports = _recent_reports(db, fuel)  # {station_id: {status, at, count}}
+    # станционный 4-state статус (gdebenz + user) — на станцию берём свежайший
+    avail: dict[int, StationAvail] = {}
+    for a in db.query(StationAvail).order_by(StationAvail.updated_at.asc()).all():
+        avail[a.station_id] = a  # asc → последним остаётся самый свежий
+    com_counts = dict(
+        db.query(Comment.station_id, func.count(Comment.id))
+        .group_by(Comment.station_id).all()
+    )
 
     items: list[StationListItem] = []
     for st in stations:
@@ -149,6 +162,7 @@ def list_stations(
             available = False
         # Benzuber подтверждает выбранный вид (только положительно)
         bz_confirms = bool(fuel) and fuel in (st.benzuber_fuels or [])
+        av = avail.get(st.id)
         items.append(StationListItem(
             id=st.id, brand=st.brand, name=st.name, address=st.address,
             lat=st.lat, lon=st.lon, opening_hours=st.opening_hours,
@@ -159,6 +173,9 @@ def list_stations(
             report_at=rep["at"] if rep else None,
             report_count=rep["count"] if rep else 0,
             benzuber_confirms=bz_confirms,
+            avail_state=av.state if av else None,
+            avail_confirmations=av.confirmations if av else 0,
+            comment_count=com_counts.get(st.id, 0),
         ))
 
     if fuel and sort == "price":

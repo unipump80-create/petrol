@@ -83,3 +83,50 @@ class FuelReport(Base):
     __table_args__ = (
         Index("ix_reports_station_fuel_time", "station_id", "fuel_type", "created_at"),
     )
+
+
+class StationAvail(Base):
+    """Станционный 4-state статус наличия (модель ГдеБЕНЗ).
+
+    Одна строка на станцию — текущее народное состояние АЗС целиком
+    (не по видам топлива). Пин на карте красится по нему.
+
+    state:
+      yes   — есть топливо (АЗС работает нормально)   🟢
+      queue — топливо есть, но очередь                 🟠
+      low   — мало / лимиты отпуска                    🟡
+      no    — топлива нет (по свежим отметкам)          🔴
+    """
+    __tablename__ = "station_avail"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # без unique: на станцию может быть несколько отметок (gdebenz + user) —
+    # в выдаче побеждает самая свежая (по updated_at).
+    station_id = Column(Integer, ForeignKey("stations.id"), index=True)
+    state = Column(String, index=True)            # yes | queue | low | no
+    confirmations = Column(Integer, default=0)    # подтверждений отметки
+    last_at = Column(DateTime, nullable=True)     # время последней отметки (источник)
+    source = Column(String, default="gdebenz", index=True)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class Comment(Base):
+    """Комментарий водителя под АЗС (как у ГдеБЕНЗ).
+
+    Источник 'gdebenz' — подтянутые из /api/comments; 'user' — оставленные
+    в нашем приложении. Эфемерны при необходимости (но не TTL — храним).
+    """
+    __tablename__ = "comments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    station_id = Column(Integer, ForeignKey("stations.id"), index=True)
+    text = Column(String)
+    author = Column(String, nullable=True)        # имя/ник, может быть пустым
+    state = Column(String, nullable=True)         # сопутствующий статус yes/queue/low/no
+    source = Column(String, default="user", index=True)  # user | gdebenz
+    ext_id = Column(String, nullable=True, index=True)    # id у источника (дедуп)
+    created_at = Column(DateTime, default=utcnow, index=True)
+
+    __table_args__ = (
+        Index("ix_comments_station_time", "station_id", "created_at"),
+    )
