@@ -6,9 +6,11 @@
 """
 import logging
 import re
+import time
+from collections import deque
 from math import radians, sin, cos, asin, sqrt
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -20,6 +22,23 @@ router = APIRouter(prefix="/community", tags=["community"])
 logger = logging.getLogger(__name__)
 
 IVANOVO = (57.0, 40.97)
+
+# Простой in-memory rate-limit по IP для мутирующих UGC-ручек (анти-спам).
+_RL_MAX = 15          # запросов
+_RL_WINDOW = 60.0     # за окно, сек
+_rl_hits: dict[str, deque] = {}
+
+
+def rate_limit(request: Request) -> None:
+    ip = request.client.host if request.client else "?"
+    now = time.monotonic()
+    dq = _rl_hits.setdefault(ip, deque())
+    while dq and now - dq[0] > _RL_WINDOW:
+        dq.popleft()
+    if len(dq) >= _RL_MAX:
+        raise HTTPException(status_code=429, detail="Слишком часто. Подождите минуту.",
+                            headers={"Retry-After": "60"})
+    dq.append(now)
 
 STATE_LABEL = {
     "yes": "🟢 есть",
@@ -78,7 +97,8 @@ def list_comments(
 
 
 @router.post("/comments", response_model=CommentOut)
-def add_comment(body: CommentIn, db: Session = Depends(get_db)):
+def add_comment(body: CommentIn, db: Session = Depends(get_db),
+                _rl: None = Depends(rate_limit)):
     """Добавить комментарий водителя под АЗС."""
     text = (body.text or "").strip()
     if not text:
@@ -109,7 +129,8 @@ class MarkIn(BaseModel):
 
 
 @router.post("/mark")
-def mark_state(body: MarkIn, db: Session = Depends(get_db)):
+def mark_state(body: MarkIn, db: Session = Depends(get_db),
+               _rl: None = Depends(rate_limit)):
     """Отметить статус АЗС (как у ГдеБЕНЗ): есть/очередь/мало/нет.
 
     Пишет StationAvail(source='user'). В выдаче побеждает самая свежая
@@ -182,7 +203,8 @@ def _detect_state(text: str) -> str:
 
 
 @router.post("/chat")
-def chat(body: ChatIn, db: Session = Depends(get_db)):
+def chat(body: ChatIn, db: Session = Depends(get_db),
+         _rl: None = Depends(rate_limit)):
     """Rule-based помощник по наличию и ценам топлива."""
     msg = (body.message or "").lower().strip()
     if not msg:

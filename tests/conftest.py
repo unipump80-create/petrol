@@ -14,6 +14,20 @@ from app.services import cache as _cache
 
 
 @pytest.fixture(autouse=True)
+def _no_network(monkeypatch):
+    """Глушим сетевые сайд-эффекты lifespan в тестах.
+
+    TestClient(app) запускает lifespan → start_scheduler(enrich_now) и
+    _ensure_data ходят в russiabase/gdebenz/benzuber/osm вживую → флэки и
+    ConnectTimeout. В тестах эти шаги — no-op.
+    """
+    import app.main as _main
+    monkeypatch.setattr(_main, "start_scheduler", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(_main, "_ensure_data", lambda *a, **k: None, raising=False)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _clear_cache():
     """Глобальный in-memory кэш не должен протекать между тестами."""
     _cache.cache_clear()
