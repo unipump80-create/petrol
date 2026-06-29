@@ -166,5 +166,12 @@ def load_ivanovo(db: Session) -> tuple[int, int]:
         n_stations += 1
 
     db.commit()
-    logger.info("russiabase: %d станций, %d цен", n_stations, n_prices)
+    # Алерт на поломку парсинга: 0 станций/цен почти всегда = смена вёрстки
+    # источника или блокировка, а не реальное отсутствие данных.
+    if n_stations == 0 or n_prices == 0:
+        logger.error("russiabase: ПУСТОЙ парсинг (станций=%d, цен=%d) — "
+                     "вероятно сменилась вёрстка источника или блокировка",
+                     n_stations, n_prices)
+    else:
+        logger.info("russiabase: %d станций, %d цен", n_stations, n_prices)
     return n_stations, n_prices

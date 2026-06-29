@@ -136,8 +136,38 @@ def load_gdebenz(db: Session, center: tuple[float, float] = IVANOVO) -> dict:
         logger.warning("gdebenz: пустой ответ — отчёты сохранены, обновление пропущено")
         return {"checked": 0, "no_fuel": 0, "reports": 0}
 
-    # Наши станции имеют координаты, но не osm_id — сопоставляем по близости
-    # (как benzuber/cardoil), а не по osm_id.
+    # Набор станций строим из ГдеБЕНЗ, чтобы карта совпадала с сайтом gdebenz.ru
+    # (russiabase деградировал и отдаёт лишь часть городских АЗС). Создаём
+    # недостающие станции из nearby (osm_id/coords/brand), не дублируя те, что
+    # уже есть рядом (russiabase даёт им цены).
+    existing = [s for s in db.query(Station).all() if s.lat and s.lon]
+    by_osm = {s.osm_id: s for s in existing if s.osm_id}
+    created = 0
+    for item in stations:
+        la, lo = item.get("lat"), item.get("lon")
+        if la is None or lo is None:
+            continue
+        try:
+            oid = int(item["osm_id"])
+        except (KeyError, TypeError, ValueError):
+            oid = None
+        if oid and oid in by_osm:
+            continue
+        if any(_dist_m(la, lo, s.lat, s.lon) < MATCH_RADIUS_M for s in existing):
+            continue  # рядом уже есть наша станция — не дублируем
+        st = Station(poiid=None, osm_id=oid, name=(item.get("name") or "АЗС"),
+                     brand=(item.get("brand") or ""), lat=la, lon=lo,
+                     fuel_types=[], source=SOURCE)
+        db.add(st)
+        existing.append(st)
+        if oid:
+            by_osm[oid] = st
+        created += 1
+    if created:
+        db.commit()
+        logger.info("gdebenz: создано %d станций из набора ГдеБЕНЗ", created)
+
+    # Сопоставляем наличие по близости (как benzuber/cardoil).
     ours = [s for s in db.query(Station).all() if s.lat and s.lon]
 
     # Сносим прошлые отчёты ГдеБЕНЗ — держим только актуальное состояние
@@ -198,7 +228,7 @@ def load_gdebenz(db: Session, center: tuple[float, float] = IVANOVO) -> dict:
     db.commit()
     logger.info("gdebenz: %d без топлива, %d с топливом, %d отчётов (из %d отметок)",
                 no_fuel, has_fuel, reports, len(stations))
-    return {"checked": len(stations), "no_fuel": no_fuel,
+    return {"checked": len(stations), "created": created, "no_fuel": no_fuel,
             "has_fuel": has_fuel, "reports": reports}
 
 
